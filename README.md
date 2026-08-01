@@ -3,9 +3,11 @@
 **私有化部署的电子书阅读 · 标注 · 引用管理系统**
 
 [![Docker Pulls](https://img.shields.io/docker/pulls/streamstack/moyin)](https://hub.docker.com/r/streamstack/moyin)
-[![Image](https://img.shields.io/docker/v/streamstack/moyin/latest?label=image)](https://hub.docker.com/r/streamstack/moyin/tags)
+[![Image Size](https://img.shields.io/docker/image-size/streamstack/moyin/latest)](https://hub.docker.com/r/streamstack/moyin/tags)
 [![Platform](https://img.shields.io/badge/platform-amd64%20%7C%20arm64-blue)](https://hub.docker.com/r/streamstack/moyin)
 [![License](https://img.shields.io/badge/license-MIT-green)](./LICENSE)
+
+**镜像：** [`streamstack/moyin:latest`](https://hub.docker.com/r/streamstack/moyin) · **源码：** [`streamstack-cn/moyin`](https://github.com/streamstack-cn/moyin)
 
 统一书库、在线阅读 EPUB / PDF、划词高亮与笔记，并把引文整理进「引用篮」，导出带真脚注的 Word 草稿。适合 NAS / 家庭服务器 / 内网小团队。
 

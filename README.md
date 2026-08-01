@@ -2,8 +2,8 @@
 
 **私有化部署的电子书阅读 · 标注 · 引用管理系统**
 
-[![Docker Pulls](https://img.shields.io/docker/pulls/streamstack/moyin)](https://hub.docker.com/r/streamstack/moyin)
-[![Image Size](https://img.shields.io/docker/image-size/streamstack/moyin/latest)](https://hub.docker.com/r/streamstack/moyin/tags)
+[![Docker Hub](https://img.shields.io/badge/Docker_Hub-streamstack%2Fmoyin-066da5?logo=docker&logoColor=white)](https://hub.docker.com/r/streamstack/moyin)
+[![Docker Pulls](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fhub.docker.com%2Fv2%2Frepositories%2Fstreamstack%2Fmoyin%2F&query=%24.pull_count&label=docker%20pulls&color=066da5&logo=docker&logoColor=white&cacheSeconds=300)](https://hub.docker.com/r/streamstack/moyin)
 [![Platform](https://img.shields.io/badge/platform-amd64%20%7C%20arm64-blue)](https://hub.docker.com/r/streamstack/moyin)
 [![License](https://img.shields.io/badge/license-MIT-green)](./LICENSE)
 

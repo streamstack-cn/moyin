@@ -27,14 +27,16 @@ docker compose up -d
 ### 方式 B：标准版（含 Redis，推荐）
 
 ```bash
-mkdir -p moyin/config && cd moyin
+mkdir -p moyin/config moyin/redis && cd moyin
 curl -fsSL -o docker-compose.yml \
   https://raw.githubusercontent.com/streamstack-cn/moyin/main/docker-compose.redis.yml
 docker compose up -d
 ```
 
-打开：`http://<主机IP>:8420`  
+打开：`http://<主机IP>:6173`（也可使用 `8420`）  
 默认账号：`admin` /（yml 里的 `ADMIN_PASSWORD`，默认 `change_me`）
+
+> 生产镜像里前端与 API 由 Nginx 统一在容器 `8420` 提供；Compose 将宿主机 **6173** 与 **8420** 都映射到该端口。开发时的 Vite `6173` 仅用于本地 `npm run dev`，不在镜像内单独跑。
 
 ```bash
 docker compose logs -f moyin   # 看日志
@@ -46,15 +48,21 @@ docker compose down            # 停止
 | 文件 | 内容 |
 |------|------|
 | [`docker-compose.yml`](./docker-compose.yml) | 单容器，内置 SQLite，无 Redis |
-| [`docker-compose.redis.yml`](./docker-compose.redis.yml) | 应用 + Redis（元数据缓存、登录限流） |
+| [`docker-compose.redis.yml`](./docker-compose.redis.yml) | 应用 + Redis（数据目录 `./redis` 绑定挂载） |
 
-可选：在 yml 中取消注释并挂载电子书目录：
+挂载电子书目录时须**可读写**（删除图书会物理删除源文件），在 yml 中取消注释并改路径：
 
 ```yaml
-- /path/to/your/ebooks:/library-source:ro
+- /path/to/your/ebooks:/library-source
 ```
 
-数据保存在当前目录的 `./config`，请勿删除。
+Redis 使用宿主机目录绑定（非 Docker 命名卷），默认 `./redis:/data`，可改成绝对路径，例如：
+
+```yaml
+- /data/moyin-redis:/data
+```
+
+应用数据在 `./config`，请勿删除。
 
 ---
 

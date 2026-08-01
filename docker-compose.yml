@@ -2,9 +2,12 @@
 # 安装：
 #   mkdir -p moyin/config && cd moyin
 #   curl -fsSL -o docker-compose.yml https://raw.githubusercontent.com/streamstack-cn/moyin/main/docker-compose.yml
-#   # 按需修改下方密码后：
+#   # 按需修改下方密码、电子书目录后：
 #   docker compose up -d
-# 访问：http://<主机IP>:8420
+# 访问：http://<主机IP>:6173
+#
+# 说明：镜像内由 Nginx 在 8420 同时提供前端静态页与 /api；
+# 宿主机映射 6173→8420，与开发时前端端口一致。
 
 services:
   moyin:
@@ -12,11 +15,12 @@ services:
     container_name: moyin
     restart: unless-stopped
     ports:
-      - "8420:8420"
+      - "6173:8420"   # Web 入口（前端 + API）
+      - "8420:8420"   # 兼容原后端端口
     volumes:
       - ./config:/config
-      # 可选：挂载本机电子书目录（只读），取消注释并改成你的路径
-      # - /path/to/your/ebooks:/library-source:ro
+      # 电子书目录需可读写：页面删除图书时会物理删除源文件。改成你的路径后取消注释：
+      # - /path/to/your/ebooks:/library-source
     environment:
       ADMIN_USERNAME: admin
       ADMIN_PASSWORD: change_me          # 首次启动生效，请改成强密码

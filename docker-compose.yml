@@ -12,8 +12,7 @@ services:
     container_name: moyin
     restart: unless-stopped
     ports:
-      # 对外只开放前端入口 6173（容器内 Nginx 提供页面 + /api）
-      - "6173:8420"
+      - "6173:6173"
     volumes:
       - ./config:/config
       # 电子书目录需可读写：页面删除图书时会物理删除源文件。改成你的路径后取消注释：

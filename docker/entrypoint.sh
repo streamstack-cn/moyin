@@ -124,7 +124,7 @@ else
     log_warn "强烈建议在 docker-compose.yml 中配置 ADMIN_USERNAME 和 ADMIN_PASSWORD"
 fi
 
-HOST_PORT="${APP_PORT:-8420}"
+HOST_PORT="${APP_PORT:-6173}"
 
 check_port() {
     local port=$1

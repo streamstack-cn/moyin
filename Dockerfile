@@ -14,7 +14,8 @@ FROM node:20-alpine AS frontend-builder
 WORKDIR /build
 
 COPY frontend/package*.json ./
-RUN npm ci --prefer-offline
+# 使用 npm install：跨 amd64/arm64 时 lock 中的可选原生依赖更稳妥
+RUN npm install --prefer-offline --no-audit --no-fund
 
 COPY frontend/ .
 RUN npm run build

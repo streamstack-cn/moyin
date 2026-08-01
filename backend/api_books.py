@@ -317,11 +317,12 @@ def delete_book(book_id: str, db: Session = Depends(get_db), user: User = Depend
 @router.get("/{book_id}/cover")
 def get_cover(book_id: str, db: Session = Depends(get_db)):
     book = db.query(Book).filter_by(id=book_id).first()
-    if not book or not book.cover_path or not Path(book.cover_path).exists():
+    cover = storage.resolve_stored_path(book.cover_path) if book else None
+    if not book or not cover or not cover.is_file():
         raise HTTPException(status_code=404, detail="无封面")
     # URL 已带 ?v=mtime，可长缓存；无版本参数时也允许浏览器再验证
     return FileResponse(
-        book.cover_path,
+        cover,
         headers={"Cache-Control": "public, max-age=31536000, immutable"},
     )
 

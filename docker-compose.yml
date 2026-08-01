@@ -14,11 +14,14 @@ services:
     ports:
       - "6173:6173"
     volumes:
+      # 全部应用数据（数据库/封面/转换文件）。勿删、换目录启动等于新库
       - ./config:/config
-      # 电子书目录需可读写：页面删除图书时会物理删除源文件。改成你的路径后取消注释：
+      # 电子书源目录（读写）。扫描入库后容器内必须能访问到这些文件：
       # - /path/to/your/ebooks:/library-source
     environment:
       ADMIN_USERNAME: admin
-      ADMIN_PASSWORD: change_me          # 首次启动生效，请改成强密码
+      ADMIN_PASSWORD: change_me          # 仅首次（config 内尚无用户）生效
       MOYIN_SECRET_KEY: change_me_secret # 请改成随机长字符串
       MOYIN_LIBRARY_ROOT: /library-source
+      # 本文件不含 Redis。需要请改用 docker-compose.redis.yml
+

@@ -1,40 +1,24 @@
-# ─────────────────────────────────────────────────────────────────────────────
-# 墨引 MoYin — 精简部署（不含 Redis）
-#
-# 使用方法：
-#   cp .env.example .env          # 修改密码与密钥
-#   mkdir -p config library-source
+# 墨引 MoYin — 精简版（不含 Redis）
+# 安装：
+#   mkdir -p moyin/config && cd moyin
+#   curl -fsSL -o docker-compose.yml https://raw.githubusercontent.com/streamstack-cn/moyin/main/docker-compose.yml
+#   # 按需修改下方密码后：
 #   docker compose up -d
-#
-# 需要 Redis（元数据缓存 / 登录限流）请改用：
-#   docker compose -f docker-compose.redis.yml up -d
-#
 # 访问：http://<主机IP>:8420
-# 镜像：streamstack/moyin:latest（linux/amd64、linux/arm64）
-# ─────────────────────────────────────────────────────────────────────────────
 
 services:
   moyin:
     image: streamstack/moyin:latest
-    # 本地构建时取消下一行注释，并注释掉上面的 image：
-    # build: .
     container_name: moyin
     restart: unless-stopped
     ports:
       - "8420:8420"
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
     volumes:
-      # 数据库、书库文件、封面、导出文档 —— 务必持久化
       - ./config:/config
-      # 电子书源目录（只读）。未设置 LIBRARY_HOST_PATH 时使用空目录占位
-      - ${LIBRARY_HOST_PATH:-./library-source}:/library-source:ro
+      # 可选：挂载本机电子书目录（只读），取消注释并改成你的路径
+      # - /path/to/your/ebooks:/library-source:ro
     environment:
-      - ADMIN_USERNAME=${ADMIN_USERNAME:-admin}
-      - ADMIN_PASSWORD=${ADMIN_PASSWORD:-change_this_password}
-      - MOYIN_SECRET_KEY=${MOYIN_SECRET_KEY:-change_this_to_a_random_string}
-      - MOYIN_LIBRARY_ROOT=/library-source
-      # 不设置 REDIS_URL：以无缓存模式运行，核心功能不受影响
-      # - MOYIN_TOKEN_EXPIRE_HOURS=24
-      # - DATABASE_URL=postgresql://user:password@host:5432/moyin
-      # - GOOGLE_BOOKS_API_KEY=
+      ADMIN_USERNAME: admin
+      ADMIN_PASSWORD: change_me          # 首次启动生效，请改成强密码
+      MOYIN_SECRET_KEY: change_me_secret # 请改成随机长字符串
+      MOYIN_LIBRARY_ROOT: /library-source

@@ -1,59 +1,37 @@
-# ─────────────────────────────────────────────────────────────────────────────
-# 墨引 MoYin — 标准部署（应用 + Redis）
-#
-# 使用方法：
-#   cp .env.example .env          # 修改密码、密钥与 REDIS_PASSWORD
-#   mkdir -p config library-source
-#   docker compose -f docker-compose.redis.yml up -d
-#
-# 仅需精简版（不含 Redis）请使用：
+# 墨引 MoYin — 标准版（含 Redis：元数据缓存 / 登录限流）
+# 安装：
+#   mkdir -p moyin/config && cd moyin
+#   curl -fsSL -o docker-compose.yml https://raw.githubusercontent.com/streamstack-cn/moyin/main/docker-compose.redis.yml
 #   docker compose up -d
-#
 # 访问：http://<主机IP>:8420
-# ─────────────────────────────────────────────────────────────────────────────
 
 services:
   redis:
     image: redis:7.2-alpine
     container_name: moyin-redis
     restart: unless-stopped
-    command: >
-      redis-server
-      --requirepass ${REDIS_PASSWORD:-change_this_redis_password}
-      --appendonly yes
+    command: redis-server --requirepass change_me_redis --appendonly yes
     volumes:
       - moyin-redis-data:/data
-    healthcheck:
-      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD:-change_this_redis_password}", "ping"]
-      interval: 10s
-      timeout: 3s
-      retries: 5
 
   moyin:
     image: streamstack/moyin:latest
-    # 本地构建时取消下一行注释，并注释掉上面的 image：
-    # build: .
     container_name: moyin
     restart: unless-stopped
     depends_on:
-      redis:
-        condition: service_healthy
+      - redis
     ports:
       - "8420:8420"
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
     volumes:
       - ./config:/config
-      - ${LIBRARY_HOST_PATH:-./library-source}:/library-source:ro
+      # 可选：挂载本机电子书目录（只读），取消注释并改成你的路径
+      # - /path/to/your/ebooks:/library-source:ro
     environment:
-      - ADMIN_USERNAME=${ADMIN_USERNAME:-admin}
-      - ADMIN_PASSWORD=${ADMIN_PASSWORD:-change_this_password}
-      - MOYIN_SECRET_KEY=${MOYIN_SECRET_KEY:-change_this_to_a_random_string}
-      - MOYIN_LIBRARY_ROOT=/library-source
-      - REDIS_URL=redis://:${REDIS_PASSWORD:-change_this_redis_password}@redis:6379/0
-      # - MOYIN_TOKEN_EXPIRE_HOURS=24
-      # - DATABASE_URL=postgresql://user:password@host:5432/moyin
-      # - GOOGLE_BOOKS_API_KEY=
+      ADMIN_USERNAME: admin
+      ADMIN_PASSWORD: change_me          # 首次启动生效，请改成强密码
+      MOYIN_SECRET_KEY: change_me_secret # 请改成随机长字符串
+      MOYIN_LIBRARY_ROOT: /library-source
+      REDIS_URL: redis://:change_me_redis@redis:6379/0
 
 volumes:
   moyin-redis-data:

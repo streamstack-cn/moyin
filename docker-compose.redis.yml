@@ -1,0 +1,59 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# 墨引 MoYin — 标准部署（应用 + Redis）
+#
+# 使用方法：
+#   cp .env.example .env          # 修改密码、密钥与 REDIS_PASSWORD
+#   mkdir -p config library-source
+#   docker compose -f docker-compose.redis.yml up -d
+#
+# 仅需精简版（不含 Redis）请使用：
+#   docker compose up -d
+#
+# 访问：http://<主机IP>:8420
+# ─────────────────────────────────────────────────────────────────────────────
+
+services:
+  redis:
+    image: redis:7.2-alpine
+    container_name: moyin-redis
+    restart: unless-stopped
+    command: >
+      redis-server
+      --requirepass ${REDIS_PASSWORD:-change_this_redis_password}
+      --appendonly yes
+    volumes:
+      - moyin-redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD:-change_this_redis_password}", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  moyin:
+    image: streamstack/moyin:latest
+    # 本地构建时取消下一行注释，并注释掉上面的 image：
+    # build: .
+    container_name: moyin
+    restart: unless-stopped
+    depends_on:
+      redis:
+        condition: service_healthy
+    ports:
+      - "8420:8420"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - ./config:/config
+      - ${LIBRARY_HOST_PATH:-./library-source}:/library-source:ro
+    environment:
+      - ADMIN_USERNAME=${ADMIN_USERNAME:-admin}
+      - ADMIN_PASSWORD=${ADMIN_PASSWORD:-change_this_password}
+      - MOYIN_SECRET_KEY=${MOYIN_SECRET_KEY:-change_this_to_a_random_string}
+      - MOYIN_LIBRARY_ROOT=/library-source
+      - REDIS_URL=redis://:${REDIS_PASSWORD:-change_this_redis_password}@redis:6379/0
+      # - MOYIN_TOKEN_EXPIRE_HOURS=24
+      # - DATABASE_URL=postgresql://user:password@host:5432/moyin
+      # - GOOGLE_BOOKS_API_KEY=
+
+volumes:
+  moyin-redis-data:

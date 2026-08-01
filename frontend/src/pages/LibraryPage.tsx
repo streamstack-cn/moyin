@@ -1,0 +1,1161 @@
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { useNavigate, useSearchParams } from 'react-router-dom'
+import { toast } from 'sonner'
+import {
+  BookOpen,
+  ChevronDown,
+  ChevronRight,
+  Edit3,
+  FolderPlus,
+  LayoutGrid,
+  Layers,
+  RefreshCw,
+  Search,
+  Tags,
+  Trash2,
+  UploadCloud,
+} from 'lucide-react'
+import { api, ApiError } from '../api/client'
+import type { BookSummary, BrowseResult, Library, Tag } from '../api/types'
+import BookCard from '../components/BookCard'
+import Modal from '../components/Modal'
+import { useAuth } from '../contexts/AuthContext'
+
+interface Stats {
+  total_books: number
+  finished: number
+  reading: number
+  finished_this_month: number
+  total_highlights: number
+  total_citations: number
+  missing_douban?: number
+  favorites?: number
+}
+
+type GroupMode = 'shelf' | 'tag' | 'flat'
+
+interface BookSection {
+  key: string
+  title: string
+  hint?: string
+  books: BookSummary[]
+}
+
+const GROUP_MODE_KEY = 'moyin_library_group_mode'
+const COLLAPSED_KEY = 'moyin_library_collapsed'
+const BATCH_SELECT_KEY = 'moyin_batch_select_missing'
+
+function loadBatchSelection(): Set<string> {
+  try {
+    const raw = sessionStorage.getItem(BATCH_SELECT_KEY)
+    if (!raw) return new Set()
+    const parsed = JSON.parse(raw) as unknown
+    if (!Array.isArray(parsed)) return new Set()
+    return new Set(parsed.filter((id): id is string => typeof id === 'string'))
+  } catch {
+    return new Set()
+  }
+}
+
+function saveBatchSelection(ids: Set<string>) {
+  try {
+    sessionStorage.setItem(BATCH_SELECT_KEY, JSON.stringify([...ids]))
+  } catch {
+    /* private mode */
+  }
+}
+
+function clearBatchSelectionStorage() {
+  try {
+    sessionStorage.removeItem(BATCH_SELECT_KEY)
+  } catch {
+    /* private mode */
+  }
+}
+
+function loadGroupMode(): GroupMode {
+  try {
+    const v = localStorage.getItem(GROUP_MODE_KEY)
+    if (v === 'shelf' || v === 'tag' || v === 'flat') return v
+  } catch {
+    /* private mode */
+  }
+  return 'shelf'
+}
+
+function loadCollapsed(): Record<string, boolean> {
+  try {
+    const raw = localStorage.getItem(COLLAPSED_KEY)
+    if (!raw) return {}
+    const parsed = JSON.parse(raw) as Record<string, boolean>
+    return parsed && typeof parsed === 'object' ? parsed : {}
+  } catch {
+    return {}
+  }
+}
+
+export default function LibraryPage() {
+  const { user } = useAuth()
+  const navigate = useNavigate()
+  const [searchParams] = useSearchParams()
+  const [books, setBooks] = useState<BookSummary[]>([])
+  const [tags, setTags] = useState<Tag[]>([])
+  const [libraries, setLibraries] = useState<Library[]>([])
+  const [stats, setStats] = useState<Stats | null>(null)
+  const [q, setQ] = useState('')
+  const [activeTag, setActiveTag] = useState<string | null>(null)
+  const [activeLibrary, setActiveLibrary] = useState<string | null>(null)
+  const [status, setStatus] = useState(() => searchParams.get('status') || '')
+  const metaFilter = searchParams.get('meta') || ''
+  const [loading, setLoading] = useState(true)
+  const [showLibraryModal, setShowLibraryModal] = useState(false)
+  const [scanningAll, setScanningAll] = useState(false)
+  const [scanBusy, setScanBusy] = useState(false)
+  const [stoppingScan, setStoppingScan] = useState(false)
+  const [groupMode, setGroupMode] = useState<GroupMode>(loadGroupMode)
+  const [collapsed, setCollapsed] = useState<Record<string, boolean>>(loadCollapsed)
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(() =>
+    searchParams.get('meta') === 'missing_douban' ? loadBatchSelection() : new Set(),
+  )
+  const [showBatchDelete, setShowBatchDelete] = useState(false)
+  const [batchDeleting, setBatchDeleting] = useState(false)
+  const fileInputRef = useRef<HTMLInputElement>(null)
+  const softWatchTimerRef = useRef<number | null>(null)
+  const canBatchDelete = user?.role === 'admin' && metaFilter === 'missing_douban'
+
+  async function refresh(opts?: { silent?: boolean }) {
+    if (!opts?.silent) setLoading(true)
+    try {
+      const params = new URLSearchParams()
+      if (q) params.set('q', q)
+      if (activeTag) params.set('tag', activeTag)
+      if (status) params.set('status', status)
+      if (metaFilter) params.set('meta', metaFilter)
+      const [b, t] = await Promise.all([
+        api.get<BookSummary[]>(`/api/books?${params.toString()}`),
+        api.get<Tag[]>('/api/tags'),
+      ])
+      setBooks(b)
+      setTags(t)
+    } catch (err) {
+      if (!opts?.silent) toast.error(err instanceof ApiError ? err.message : '加载书库失败')
+    } finally {
+      if (!opts?.silent) setLoading(false)
+    }
+  }
+
+  function clearSoftWatch() {
+    if (softWatchTimerRef.current != null) {
+      window.clearInterval(softWatchTimerRef.current)
+      softWatchTimerRef.current = null
+    }
+  }
+
+  /** 后台轻量轮询：以 scan/status 为准，扫完或停止后静默刷新 */
+  function softWatchScan() {
+    clearSoftWatch()
+    let tries = 0
+    softWatchTimerRef.current = window.setInterval(async () => {
+      tries += 1
+      try {
+        const status = await api.get<{ busy: boolean }>('/api/libraries/scan/status')
+        const libs = await api.get<Library[]>('/api/libraries')
+        setLibraries(libs)
+        setScanBusy(Boolean(status.busy))
+        if (!status.busy || tries >= 180) {
+          clearSoftWatch()
+          setScanBusy(false)
+          await refresh({ silent: true })
+          api.get<Stats>('/api/admin/stats').then(setStats).catch(() => {})
+          if (!status.busy && tries > 1) toast.success('书库扫描已结束')
+        }
+      } catch {
+        if (tries >= 180) clearSoftWatch()
+      }
+    }, 2000)
+  }
+
+  async function scanAllLibraries() {
+    if (scanningAll) return
+    setScanningAll(true)
+    try {
+      const libs = await api.get<Library[]>('/api/libraries')
+      setLibraries(libs)
+      if (libs.length === 0) {
+        toast.error('还没有书库目录，请先添加')
+        return
+      }
+      await api.post('/api/libraries/scan-all')
+      setScanBusy(true)
+      toast.success('已排队后台扫描，可继续浏览；需要时可点「停止扫描」')
+      softWatchScan()
+    } catch (err) {
+      toast.error(err instanceof ApiError ? err.message : '扫描失败')
+    } finally {
+      setScanningAll(false)
+    }
+  }
+
+  async function stopScan() {
+    if (stoppingScan) return
+    setStoppingScan(true)
+    try {
+      await api.post('/api/libraries/scan/stop')
+      clearSoftWatch()
+      setScanBusy(false)
+      toast.success('已请求停止扫描（排队已清空；当前文件处理完即停）')
+      await refresh({ silent: true })
+      api.get<Library[]>('/api/libraries').then(setLibraries).catch(() => {})
+    } catch (err) {
+      toast.error(err instanceof ApiError ? err.message : '停止失败')
+    } finally {
+      setStoppingScan(false)
+    }
+  }
+
+  function setMetaFilter(next: string) {
+    const params = new URLSearchParams(searchParams)
+    if (next) params.set('meta', next)
+    else params.delete('meta')
+    const qs = params.toString()
+    navigate(qs ? `/library?${qs}` : '/library', { replace: true })
+    if (next === 'missing_douban') {
+      setSelectedIds(loadBatchSelection())
+    } else {
+      clearBatchSelectionStorage()
+      setSelectedIds(new Set())
+    }
+    if (next === 'missing_douban' || next === 'favorited') {
+      setActiveLibrary(null)
+      setActiveTag(null)
+      setStatus('')
+      setQ('')
+    }
+  }
+
+  function toggleSelect(bookId: string) {
+    setSelectedIds((prev) => {
+      const next = new Set(prev)
+      if (next.has(bookId)) next.delete(bookId)
+      else next.add(bookId)
+      return next
+    })
+  }
+
+  function selectAllMissing() {
+    setSelectedIds(new Set(filteredBooks.map((b) => b.id)))
+  }
+
+  function clearSelection() {
+    setSelectedIds(new Set())
+    clearBatchSelectionStorage()
+  }
+
+  async function batchDeleteSelected() {
+    if (!selectedIds.size || batchDeleting) return
+    setBatchDeleting(true)
+    try {
+      const res = await api.post<{
+        deleted_count: number
+        failed: { id: string; title?: string; error: string }[]
+      }>('/api/books/batch-delete', { book_ids: [...selectedIds] })
+      const failed = res.failed?.length || 0
+      if (res.deleted_count > 0) {
+        toast.success(
+          failed
+            ? `已删除 ${res.deleted_count} 本，${failed} 本失败`
+            : `已删除 ${res.deleted_count} 本（含本地文件）`,
+        )
+      } else {
+        toast.error(res.failed?.[0]?.error || '删除失败')
+      }
+      setShowBatchDelete(false)
+      setSelectedIds(new Set())
+      clearBatchSelectionStorage()
+      await refresh({ silent: true })
+      api.get<Stats>('/api/admin/stats').then(setStats).catch(() => {})
+    } catch (err) {
+      toast.error(err instanceof ApiError ? err.message : '批量删除失败')
+    } finally {
+      setBatchDeleting(false)
+    }
+  }
+
+  function onFavoriteChange(bookId: string, isFavorite: boolean) {
+    setBooks((prev) => {
+      const next = prev.map((b) => (b.id === bookId ? { ...b, is_favorite: isFavorite } : b))
+      if (metaFilter === 'favorited' && !isFavorite) {
+        return next.filter((b) => b.id !== bookId)
+      }
+      return next
+    })
+    setStats((prev) =>
+      prev
+        ? {
+            ...prev,
+            favorites: Math.max(0, (prev.favorites ?? 0) + (isFavorite ? 1 : -1)),
+          }
+        : prev,
+    )
+  }
+
+  useEffect(() => {
+    refresh()
+    api.get<Stats>('/api/admin/stats').then(setStats).catch(() => {})
+    api.get<Library[]>('/api/libraries').then(setLibraries).catch(() => {})
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [q, activeTag, status, metaFilter])
+
+  // 移动端不提供标签筛选；若仍停留在「按标签」视图则退回书架
+  useEffect(() => {
+    const mq = window.matchMedia('(max-width: 860px)')
+    const sync = () => {
+      if (!mq.matches) return
+      if (activeTag) setActiveTag(null)
+      if (groupMode === 'tag') setGroupMode('shelf')
+    }
+    sync()
+    mq.addEventListener('change', sync)
+    return () => mq.removeEventListener('change', sync)
+  }, [activeTag, groupMode])
+
+  useEffect(() => {
+    if (metaFilter === 'missing_douban') saveBatchSelection(selectedIds)
+  }, [selectedIds, metaFilter])
+
+  useEffect(() => {
+    if (user?.role !== 'admin') return
+    let cancelled = false
+    async function poll() {
+      try {
+        const status = await api.get<{ busy: boolean }>('/api/libraries/scan/status')
+        if (!cancelled) setScanBusy(Boolean(status.busy))
+      } catch {
+        /* ignore */
+      }
+    }
+    void poll()
+    const timer = window.setInterval(poll, 4000)
+    return () => {
+      cancelled = true
+      window.clearInterval(timer)
+    }
+  }, [user?.role])
+
+  useEffect(() => () => clearSoftWatch(), [])
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(GROUP_MODE_KEY, groupMode)
+    } catch {
+      /* private mode */
+    }
+  }, [groupMode])
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(COLLAPSED_KEY, JSON.stringify(collapsed))
+    } catch {
+      /* private mode */
+    }
+  }, [collapsed])
+
+  const filteredBooks = useMemo(() => {
+    if (!activeLibrary) return books
+    if (activeLibrary === '__none__') return books.filter((b) => !b.library_id)
+    return books.filter((b) => b.library_id === activeLibrary)
+  }, [books, activeLibrary])
+
+  const sections = useMemo(() => {
+    return buildBookSections(filteredBooks, groupMode, libraries, tags)
+  }, [filteredBooks, groupMode, libraries, tags])
+
+  const emptyHint = useMemo(() => {
+    if (loading) return null
+    if (filteredBooks.length > 0) return null
+    if (metaFilter === 'favorited') return '还没有收藏的书，点封面右上角星星收藏'
+    if (metaFilter === 'missing_douban') return '没有缺少信息的书籍'
+    return q || activeTag || status || activeLibrary ? '没有匹配的书籍' : '书库还是空的，上传第一本电子书开始吧'
+  }, [loading, filteredBooks, q, activeTag, status, activeLibrary, metaFilter])
+
+  const effectiveGroupMode: GroupMode =
+    metaFilter === 'missing_douban' || metaFilter === 'favorited' ? 'flat' : groupMode
+
+  function toggleSection(key: string) {
+    setCollapsed((prev) => ({ ...prev, [key]: !prev[key] }))
+  }
+
+  return (
+    <>
+      <div className="topbar library-topbar">
+        <div className="library-topbar-heading">
+          <div className="page-title">我的书库</div>
+          <div className="page-subtitle">按书架与标签浏览 · 标注 · 沉淀写作引用</div>
+        </div>
+        {user?.role === 'admin' && (
+          <div className="library-topbar-actions">
+            <button className="btn" onClick={scanAllLibraries} disabled={scanningAll || scanBusy} title="扫描全部书库目录并同步增删">
+              <RefreshCw size={16} className={scanningAll || scanBusy ? 'spin' : undefined} />
+              <span className="btn-label-full">{scanningAll || scanBusy ? '扫描中…' : '扫描书库'}</span>
+              <span className="btn-label-short">{scanningAll || scanBusy ? '扫描中' : '扫描'}</span>
+            </button>
+            {(scanBusy || stoppingScan) && (
+              <button
+                className="btn btn-danger"
+                onClick={stopScan}
+                disabled={stoppingScan}
+                title="立刻清空排队并中止当前扫描，避免大库继续入库"
+              >
+                <span className="btn-label-full">{stoppingScan ? '停止中…' : '停止扫描'}</span>
+                <span className="btn-label-short">{stoppingScan ? '停止中' : '停止'}</span>
+              </button>
+            )}
+            <button className="btn" onClick={() => setShowLibraryModal(true)} title="管理书库目录">
+              <FolderPlus size={16} />
+              <span className="btn-label-full">管理书库目录</span>
+              <span className="btn-label-short">目录</span>
+            </button>
+            <button className="btn btn-primary" onClick={() => fileInputRef.current?.click()} title="上传电子书">
+              <UploadCloud size={16} />
+              <span className="btn-label-full">上传电子书</span>
+              <span className="btn-label-short">上传</span>
+            </button>
+            <input
+              ref={fileInputRef}
+              type="file"
+              hidden
+              accept=".epub,.pdf,.mobi,.azw3,.azw,.fb2,.txt,.cbz,.cbr"
+              onChange={async (e) => {
+                const file = e.target.files?.[0]
+                e.target.value = ''
+                if (!file) return
+                const formData = new FormData()
+                formData.append('file', file)
+                const tId = toast.loading(`正在导入《${file.name}》…`)
+                try {
+                  await api.upload('/api/books/upload', formData)
+                  toast.success('导入成功', { id: tId })
+                  refresh()
+                } catch (err) {
+                  toast.error(err instanceof ApiError ? err.message : '导入失败', { id: tId })
+                }
+              }}
+            />
+          </div>
+        )}
+      </div>
+
+      <div className="page-content">
+        <div className="stat-strip" aria-label="书库概览">
+          <span className="stat-strip-item">
+            <span className="stat-strip-label">馆藏</span>
+            <span className="stat-strip-value">{stats?.total_books ?? '—'}</span>
+          </span>
+          <span className="stat-strip-item">
+            <span className="stat-strip-label">在读</span>
+            <span className="stat-strip-value">{stats?.reading ?? '—'}</span>
+          </span>
+          <span className="stat-strip-item">
+            <span className="stat-strip-label">本月读完</span>
+            <span className="stat-strip-value">{stats?.finished_this_month ?? '—'}</span>
+          </span>
+          <span className="stat-strip-item">
+            <span className="stat-strip-label">高亮</span>
+            <span className="stat-strip-value">{stats?.total_highlights ?? '—'}</span>
+          </span>
+          <button
+            type="button"
+            className={`stat-strip-item clickable${metaFilter === 'favorited' ? ' active' : ''}`}
+            onClick={() => setMetaFilter(metaFilter === 'favorited' ? '' : 'favorited')}
+            title="查看我收藏的书（特别好的 / 待看）"
+          >
+            <span className="stat-strip-label">收藏</span>
+            <span className="stat-strip-value">{stats?.favorites ?? '—'}</span>
+          </button>
+          <button
+            type="button"
+            className={`stat-strip-item clickable${metaFilter === 'missing_douban' ? ' active' : ''}`}
+            onClick={() => setMetaFilter(metaFilter === 'missing_douban' ? '' : 'missing_douban')}
+            title="查看缺少信息的书，点开可手动编辑或匹配豆瓣"
+          >
+            <span className="stat-strip-label">缺少信息</span>
+            <span className="stat-strip-value">{stats?.missing_douban ?? '—'}</span>
+          </button>
+        </div>
+
+        {metaFilter === 'favorited' && (
+          <div className="library-meta-banner">
+            <div>
+              <strong>我的收藏</strong>
+              <span>特别好的书、待看清单；点封面右上角星星可取消</span>
+            </div>
+            <button type="button" className="btn btn-sm" onClick={() => setMetaFilter('')}>
+              清除筛选
+            </button>
+          </div>
+        )}
+
+        {metaFilter === 'missing_douban' && (
+          <div className="library-meta-banner">
+            <div>
+              <strong>缺少信息</strong>
+              <span>
+                {canBatchDelete
+                  ? '点封面即可勾选/取消；勾选会保留，从详情返回后仍在。需要编辑时点封面左下角「详情」'
+                  : '点封面进入详情，可「匹配豆瓣」或「手动编辑信息」'}
+              </span>
+            </div>
+            <div className="library-meta-banner-actions">
+              {canBatchDelete && filteredBooks.length > 0 && (
+                <>
+                  <button type="button" className="btn btn-sm" onClick={selectAllMissing}>
+                    全选（{filteredBooks.length}）
+                  </button>
+                  {selectedIds.size > 0 && (
+                    <button type="button" className="btn btn-sm" onClick={clearSelection}>
+                      取消选择
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    className="btn btn-sm btn-danger"
+                    disabled={!selectedIds.size}
+                    onClick={() => setShowBatchDelete(true)}
+                  >
+                    <Trash2 size={14} />
+                    删除所选（{selectedIds.size}）
+                  </button>
+                </>
+              )}
+              <button type="button" className="btn btn-sm" onClick={() => setMetaFilter('')}>
+                清除筛选
+              </button>
+            </div>
+          </div>
+        )}
+
+        <div className="toolbar library-toolbar">
+          <div className="search-box">
+            <Search size={16} />
+            <input className="input" placeholder="按书名 / 作者 / ISBN 搜索…" value={q} onChange={(e) => setQ(e.target.value)} />
+          </div>
+          <select className="input" style={{ width: 140 }} value={status} onChange={(e) => setStatus(e.target.value)}>
+            <option value="">全部状态</option>
+            <option value="unread">未读</option>
+            <option value="reading">在读</option>
+            <option value="finished">已读完</option>
+          </select>
+          <div className="library-view-switch" role="group" aria-label="排版方式">
+            <button
+              type="button"
+              className={groupMode === 'shelf' ? 'active' : ''}
+              onClick={() => setGroupMode('shelf')}
+              title="按书架分组"
+            >
+              <Layers size={14} />
+              书架
+            </button>
+            <button
+              type="button"
+              className={`library-view-tag ${groupMode === 'tag' ? 'active' : ''}`}
+              onClick={() => setGroupMode('tag')}
+              title="按标签分组"
+            >
+              <Tags size={14} />
+              标签
+            </button>
+            <button
+              type="button"
+              className={groupMode === 'flat' ? 'active' : ''}
+              onClick={() => setGroupMode('flat')}
+              title="平铺全部"
+            >
+              <LayoutGrid size={14} />
+              平铺
+            </button>
+          </div>
+        </div>
+
+        {libraries.length > 0 && (
+          <div className="library-filter-row" aria-label="书架筛选">
+            <span
+              className={`tag-pill ${!activeLibrary ? 'active' : ''}`}
+              onClick={() => setActiveLibrary(null)}
+            >
+              全部书架
+            </span>
+            {libraries.map((lib) => (
+              <span
+                key={lib.id}
+                className={`tag-pill ${activeLibrary === lib.id ? 'active' : ''}`}
+                onClick={() => setActiveLibrary(activeLibrary === lib.id ? null : lib.id)}
+              >
+                {lib.name} · {lib.book_count}
+              </span>
+            ))}
+            <span
+              className={`tag-pill ${activeLibrary === '__none__' ? 'active' : ''}`}
+              onClick={() => setActiveLibrary(activeLibrary === '__none__' ? null : '__none__')}
+            >
+              未归架
+            </span>
+          </div>
+        )}
+
+        {tags.length > 0 && (
+          <div className="library-filter-row library-tag-filter" aria-label="标签筛选">
+            <span
+              className={`tag-pill ${!activeTag ? 'active' : ''}`}
+              onClick={() => setActiveTag(null)}
+            >
+              全部标签
+            </span>
+            {tags.map((t) => (
+              <span
+                key={t.id}
+                className={`tag-pill ${activeTag === t.name ? 'active' : ''}`}
+                onClick={() => setActiveTag(activeTag === t.name ? null : t.name)}
+              >
+                {t.name} · {t.book_count}
+              </span>
+            ))}
+          </div>
+        )}
+
+        {loading ? (
+          <div className="empty-state">
+            <div className="spinner" />
+          </div>
+        ) : emptyHint ? (
+          <div className="empty-state">
+            <BookOpen size={34} style={{ opacity: 0.4 }} />
+            <div>{emptyHint}</div>
+          </div>
+        ) : effectiveGroupMode === 'flat' ? (
+          <div className="library-section flat">
+            <div className="library-shelf-rail" aria-hidden />
+            <div className="book-grid">
+              {filteredBooks.map((b) => (
+                <BookCard
+                  key={b.id}
+                  book={b}
+                  onFavoriteChange={onFavoriteChange}
+                  selectable={canBatchDelete}
+                  selected={selectedIds.has(b.id)}
+                  onToggleSelect={toggleSelect}
+                />
+              ))}
+            </div>
+          </div>
+        ) : (
+          <div className="library-sections">
+            {sections.map((section) => {
+              const isCollapsed = Boolean(collapsed[section.key])
+              return (
+                <section key={section.key} className="library-section">
+                  <button
+                    type="button"
+                    className="library-section-header"
+                    onClick={() => toggleSection(section.key)}
+                    aria-expanded={!isCollapsed}
+                  >
+                    <span className="library-section-chevron">
+                      {isCollapsed ? <ChevronRight size={16} /> : <ChevronDown size={16} />}
+                    </span>
+                    <span className="library-section-title">{section.title}</span>
+                    <span className="library-section-count">{section.books.length}</span>
+                    {section.hint && <span className="library-section-hint">{section.hint}</span>}
+                  </button>
+                  {!isCollapsed && (
+                    <>
+                      <div className="library-shelf-rail" aria-hidden />
+                      <div className="book-grid">
+                        {section.books.map((b) => (
+                          <BookCard
+                            key={`${section.key}-${b.id}`}
+                            book={b}
+                            onFavoriteChange={onFavoriteChange}
+                            selectable={canBatchDelete}
+                            selected={selectedIds.has(b.id)}
+                            onToggleSelect={toggleSelect}
+                          />
+                        ))}
+                      </div>
+                    </>
+                  )}
+                </section>
+              )
+            })}
+          </div>
+        )}
+      </div>
+
+      {showBatchDelete && (
+        <Modal
+          title="批量删除书籍"
+          onClose={() => !batchDeleting && setShowBatchDelete(false)}
+          width={440}
+          closeOnBackdrop={!batchDeleting}
+        >
+          <div className="confirm-dialog">
+            <div className="confirm-dialog-lead">
+              确认删除所选的 <strong>{selectedIds.size}</strong> 本缺少信息的书？
+            </div>
+            <p className="confirm-dialog-desc">
+              将同时删除书库中的本地原文件，以及封面 / 转换副本。此操作不可撤销，重新扫描也不会再找回这些文件。
+            </p>
+            <div className="confirm-dialog-actions">
+              <button className="btn" type="button" disabled={batchDeleting} onClick={() => setShowBatchDelete(false)}>
+                取消
+              </button>
+              <button className="btn btn-danger" type="button" disabled={batchDeleting} onClick={batchDeleteSelected}>
+                <Trash2 size={15} />
+                {batchDeleting ? '删除中…' : '确认删除'}
+              </button>
+            </div>
+          </div>
+        </Modal>
+      )}
+
+      {showLibraryModal && (
+        <LibraryModal
+          libraries={libraries}
+          onClose={() => setShowLibraryModal(false)}
+          onChanged={(opts) => {
+            api.get<Library[]>('/api/libraries').then(setLibraries).catch(() => {})
+            void refresh({ silent: opts?.silent })
+          }}
+        />
+      )}
+    </>
+  )
+}
+
+function buildBookSections(
+  books: BookSummary[],
+  mode: GroupMode,
+  libraries: Library[],
+  tags: Tag[],
+): BookSection[] {
+  if (mode === 'flat' || books.length === 0) return []
+
+  if (mode === 'shelf') {
+    const libMap = new Map(libraries.map((l) => [l.id, l]))
+    const byLib = new Map<string, BookSummary[]>()
+    const unassigned: BookSummary[] = []
+    for (const book of books) {
+      if (book.library_id && libMap.has(book.library_id)) {
+        const list = byLib.get(book.library_id) || []
+        list.push(book)
+        byLib.set(book.library_id, list)
+      } else {
+        unassigned.push(book)
+      }
+    }
+    const sections: BookSection[] = []
+    // 有映射名的书架按名称排；保留 libraries 原有顺序更贴近管理习惯
+    for (const lib of libraries) {
+      const list = byLib.get(lib.id)
+      if (!list?.length) continue
+      sections.push({
+        key: `shelf:${lib.id}`,
+        title: lib.name,
+        hint: lib.root_path,
+        books: list,
+      })
+    }
+    // 已删除书架但仍挂着 library_id 的书
+    for (const [id, list] of byLib) {
+      if (libMap.has(id) || !list.length) continue
+      sections.push({
+        key: `shelf:${id}`,
+        title: '未知书架',
+        books: list,
+      })
+    }
+    if (unassigned.length) {
+      sections.push({
+        key: 'shelf:none',
+        title: '未归架',
+        hint: '上传入库或尚未关联目录的书',
+        books: unassigned,
+      })
+    }
+    return sections
+  }
+
+  // 按标签：一书可出现在多个标签下
+  const byTag = new Map<string, BookSummary[]>()
+  const untagged: BookSummary[] = []
+  for (const book of books) {
+    if (!book.tags?.length) {
+      untagged.push(book)
+      continue
+    }
+    for (const tag of book.tags) {
+      const list = byTag.get(tag) || []
+      list.push(book)
+      byTag.set(tag, list)
+    }
+  }
+  const tagOrder = tags.map((t) => t.name)
+  const sections: BookSection[] = []
+  for (const name of tagOrder) {
+    const list = byTag.get(name)
+    if (!list?.length) continue
+    sections.push({ key: `tag:${name}`, title: name, books: list })
+    byTag.delete(name)
+  }
+  for (const [name, list] of [...byTag.entries()].sort((a, b) => a[0].localeCompare(b[0], 'zh'))) {
+    if (!list.length) continue
+    sections.push({ key: `tag:${name}`, title: name, books: list })
+  }
+  if (untagged.length) {
+    sections.push({
+      key: 'tag:none',
+      title: '未打标签',
+      hint: '可在书籍详情中匹配元数据或编辑标签',
+      books: untagged,
+    })
+  }
+  return sections
+}
+
+function LibraryModal({
+  libraries,
+  onClose,
+  onChanged,
+}: {
+  libraries: Library[]
+  onClose: () => void
+  onChanged: (opts?: { silent?: boolean }) => void
+}) {
+  const [name, setName] = useState('')
+  const [rootPath, setRootPath] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [showBrowser, setShowBrowser] = useState(false)
+  const [renamingId, setRenamingId] = useState<string | null>(null)
+  const [renameValue, setRenameValue] = useState('')
+
+  const [watchOnCreate, setWatchOnCreate] = useState(false)
+  const [disablingAuto, setDisablingAuto] = useState(false)
+  const watchingCount = libraries.filter((l) => l.scan_mode === 'watch').length
+
+  async function createLibrary() {
+    if (!name || !rootPath) return
+    setBusy(true)
+    try {
+      await api.post('/api/libraries', {
+        name,
+        root_path: rootPath,
+        scan_mode: watchOnCreate ? 'watch' : 'manual',
+      })
+      toast.success(watchOnCreate ? '书架已添加（已开启变动监控）' : '书架已添加（仅手动扫描）')
+      setName('')
+      setRootPath('')
+      onChanged()
+    } catch (err) {
+      toast.error(err instanceof ApiError ? err.message : '添加失败')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function toggleWatch(lib: Library) {
+    const next = lib.scan_mode === 'watch' ? 'manual' : 'watch'
+    try {
+      await api.patch(`/api/libraries/${lib.id}`, { scan_mode: next })
+      toast.success(next === 'watch' ? '已开启目录变动自动刷新' : '已改为仅手动扫描')
+      onChanged()
+    } catch (err) {
+      toast.error(err instanceof ApiError ? err.message : '更新失败')
+    }
+  }
+
+  async function disableAllAutoScan() {
+    if (disablingAuto) return
+    setDisablingAuto(true)
+    try {
+      const res = await api.post<{
+        disabled_watch_count: number
+        cleared_queue: number
+      }>('/api/libraries/watch/disable-all')
+      toast.success(
+        `已关闭全部自动扫描：${res.disabled_watch_count} 个监控已关，定时扫描已关，排队已清空`,
+      )
+      onChanged({ silent: true })
+    } catch (err) {
+      toast.error(err instanceof ApiError ? err.message : '关闭失败')
+    } finally {
+      setDisablingAuto(false)
+    }
+  }
+
+  async function scanLibrary(id: string) {
+    try {
+      await api.post(`/api/libraries/${id}/scan`)
+      toast.success('已排队后台扫描；大库请用顶栏「停止扫描」随时中止')
+      let tries = 0
+      const timer = window.setInterval(async () => {
+        tries += 1
+        try {
+          const status = await api.get<{ busy: boolean }>('/api/libraries/scan/status')
+          if (!status.busy || tries >= 180) {
+            window.clearInterval(timer)
+            onChanged({ silent: true })
+            if (!status.busy && tries > 1) toast.success('目录扫描已结束')
+          }
+        } catch {
+          if (tries >= 180) window.clearInterval(timer)
+        }
+      }, 2000)
+    } catch (err) {
+      toast.error(err instanceof ApiError ? err.message : '扫描失败')
+    }
+  }
+
+  async function saveRename(id: string) {
+    if (!renameValue.trim()) {
+      setRenamingId(null)
+      return
+    }
+    try {
+      await api.patch(`/api/libraries/${id}`, { name: renameValue.trim() })
+      toast.success('映射名已更新')
+      onChanged()
+    } catch (err) {
+      toast.error(err instanceof ApiError ? err.message : '重命名失败')
+    } finally {
+      setRenamingId(null)
+    }
+  }
+
+  async function deleteLibrary(id: string) {
+    if (!confirm('删除书架不会删除已入库的书籍，仅解除目录关联，确定删除？')) return
+    try {
+      await api.delete(`/api/libraries/${id}`)
+      toast.success('书架已删除')
+      onChanged()
+    } catch (err) {
+      toast.error(err instanceof ApiError ? err.message : '删除失败')
+    }
+  }
+
+  return (
+    <Modal title="书库目录管理" onClose={onClose} width={620}>
+      <div style={{ color: 'var(--ink-faint)', fontSize: 12.5, marginBottom: 12 }}>
+        把宿主机上的电子书目录挂载进容器后，在此逐级浏览、选中某个文件夹即可创建一个「书架」；
+        书架显示名（映射名）与实际文件夹名相互独立，随时可改。大库（如摄影）请保持「监控关」，只在需要时手动扫描。
+      </div>
+
+      {(watchingCount > 0 || libraries.length > 0) && (
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 14 }}>
+          <button
+            type="button"
+            className="btn btn-sm btn-danger"
+            disabled={disablingAuto}
+            onClick={disableAllAutoScan}
+            title="关闭所有书架监控 + 全局定时扫描，并停止正在进行的扫描"
+          >
+            {disablingAuto ? '关闭中…' : `关闭全部自动扫描${watchingCount ? `（${watchingCount}）` : ''}`}
+          </button>
+        </div>
+      )}
+
+      {libraries.map((lib) => (
+        <div key={lib.id} className="citation-item" style={{ alignItems: 'center' }}>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            {renamingId === lib.id ? (
+              <div style={{ display: 'flex', gap: 6 }}>
+                <input
+                  className="input"
+                  style={{ padding: '4px 8px', fontSize: 13 }}
+                  value={renameValue}
+                  autoFocus
+                  onChange={(e) => setRenameValue(e.target.value)}
+                  onKeyDown={(e) => e.key === 'Enter' && saveRename(lib.id)}
+                />
+                <button className="btn btn-sm btn-primary" onClick={() => saveRename(lib.id)}>
+                  保存
+                </button>
+              </div>
+            ) : (
+              <div
+                style={{ fontWeight: 600, display: 'inline-flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}
+                onClick={() => {
+                  setRenamingId(lib.id)
+                  setRenameValue(lib.name)
+                }}
+                title="点击重命名映射名"
+              >
+                {lib.name}
+                <Edit3 size={11} style={{ opacity: 0.5 }} />
+              </div>
+            )}
+            <div style={{ fontSize: 12, color: 'var(--ink-faint)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              {lib.root_path}
+            </div>
+            <div style={{ fontSize: 11.5, color: 'var(--ink-faint)', marginTop: 3 }}>
+              {lib.book_count} 本 · {lib.scan_mode === 'watch' ? '监控中' : '手动'} ·{' '}
+              {lib.last_scanned_at ? `上次扫描 ${new Date(lib.last_scanned_at).toLocaleString()}` : '尚未扫描'}
+            </div>
+          </div>
+          <button
+            className={`btn btn-sm ${lib.scan_mode === 'watch' ? 'btn-primary' : ''}`}
+            onClick={() => toggleWatch(lib)}
+            title={lib.scan_mode === 'watch' ? '关闭自动监控' : '开启目录变动自动刷新'}
+          >
+            {lib.scan_mode === 'watch' ? '监控开' : '监控关'}
+          </button>
+          <button className="btn btn-sm" onClick={() => scanLibrary(lib.id)}>
+            扫描
+          </button>
+          <button className="icon-btn" style={{ width: 30, height: 30 }} onClick={() => deleteLibrary(lib.id)} title="删除书架">
+            <Trash2 size={13} />
+          </button>
+        </div>
+      ))}
+
+      <div className="divider" />
+
+      <div className="field">
+        <label>映射名（显示在书库筛选中的书架名称）</label>
+        <input className="input" value={name} onChange={(e) => setName(e.target.value)} placeholder="例如：神学资料" />
+      </div>
+      <div className="field">
+        <label>源目录（容器内绝对路径）</label>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <input
+            className="input"
+            value={rootPath}
+            onChange={(e) => setRootPath(e.target.value)}
+            placeholder="点击右侧「浏览挂载目录」选择，或手动填写"
+          />
+          <button className="btn btn-sm" style={{ flexShrink: 0 }} onClick={() => setShowBrowser((v) => !v)}>
+            <FolderPlus size={14} />
+            浏览挂载目录
+          </button>
+        </div>
+      </div>
+
+      {showBrowser && (
+        <DirectoryBrowser
+          onPick={(path, folderName) => {
+            setRootPath(path)
+            if (!name) setName(folderName)
+            setShowBrowser(false)
+          }}
+        />
+      )}
+
+      <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, marginTop: 12 }}>
+        <input type="checkbox" checked={watchOnCreate} onChange={(e) => setWatchOnCreate(e.target.checked)} />
+        开启目录变动自动刷新（默认关闭；大库勿开，避免自动扫入新书）
+      </label>
+
+      <button className="btn btn-primary" style={{ width: '100%', justifyContent: 'center', marginTop: 14 }} onClick={createLibrary} disabled={busy}>
+        {busy ? '添加中…' : '添加书架'}
+      </button>
+    </Modal>
+  )
+}
+
+function DirectoryBrowser({ onPick }: { onPick: (absolutePath: string, folderName: string) => void }) {
+  const [data, setData] = useState<BrowseResult | null>(null)
+  const [currentPath, setCurrentPath] = useState('')
+  const [loading, setLoading] = useState(true)
+
+  async function load(path: string) {
+    setLoading(true)
+    try {
+      const res = await api.get<BrowseResult>(`/api/libraries/browse?path=${encodeURIComponent(path)}`)
+      setData(res)
+      setCurrentPath(res.path)
+    } catch (err) {
+      toast.error(err instanceof ApiError ? err.message : '浏览目录失败')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  useEffect(() => {
+    load('')
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  const crumbs = currentPath ? currentPath.split('/').filter(Boolean) : []
+
+  return (
+    <div className="dir-browser">
+      {loading ? (
+        <div className="empty-state" style={{ minHeight: 120 }}>
+          <div className="spinner" />
+        </div>
+      ) : !data?.mount_ready ? (
+        <div className="empty-state" style={{ minHeight: 120, padding: 20 }}>
+          <div style={{ fontSize: 13 }}>
+            尚未检测到挂载目录（{data?.mount_root}）。请在 docker-compose.yml 中把宿主机电子书目录挂载到该路径后重启容器，例如：
+          </div>
+          <code style={{ fontSize: 11.5, marginTop: 8, display: 'block' }}>
+            /path/to/your/ebooks:/library-source:ro
+          </code>
+        </div>
+      ) : (
+        <>
+          <div className="dir-browser-crumbs">
+            <span className="dir-crumb" onClick={() => load('')}>
+              根目录
+            </span>
+            {crumbs.map((c, i) => (
+              <span key={i}>
+                <span className="dir-crumb-sep">/</span>
+                <span className="dir-crumb" onClick={() => load(crumbs.slice(0, i + 1).join('/'))}>
+                  {c}
+                </span>
+              </span>
+            ))}
+          </div>
+
+          {data.permission_denied && (
+            <div className="empty-state" style={{ minHeight: 'auto', padding: '10px 14px', textAlign: 'left' }}>
+              <div style={{ fontSize: 12.5, color: 'var(--danger)' }}>
+                读取该目录被拒绝（权限不足）。若使用 Docker Desktop / OrbStack，请在其"文件共享"设置中为宿主机路径
+                （{data.mount_root}）授权后重启容器，而不是代码问题。
+              </div>
+            </div>
+          )}
+          <div className="dir-browser-list">
+            {data.entries.length === 0 && !data.permission_denied && (
+              <div style={{ padding: 14, fontSize: 12.5, color: 'var(--ink-faint)' }}>此目录下没有子文件夹</div>
+            )}
+            {data.entries.map((entry) => (
+              <div key={entry.path} className="dir-browser-row" onClick={() => load(entry.path)}>
+                <FolderPlus size={14} style={{ opacity: 0.6 }} />
+                <span style={{ flex: 1 }}>{entry.name}</span>
+                <button
+                  className="btn btn-sm btn-primary"
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    onPick(`${data.mount_root}/${entry.path}`.replace(/\/+/g, '/'), entry.name)
+                  }}
+                >
+                  选择
+                </button>
+              </div>
+            ))}
+          </div>
+
+          {data.path && (
+            <button
+              className="btn btn-sm"
+              style={{ marginTop: 10 }}
+              onClick={() => onPick(data.absolute_path, data.path.split('/').pop() || data.path)}
+            >
+              直接使用当前目录「{data.path}」
+            </button>
+          )}
+        </>
+      )}
+    </div>
+  )
+}

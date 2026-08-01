@@ -1,0 +1,35 @@
+{
+  "name": "墨引 MoYin",
+  "short_name": "墨引",
+  "description": "电子书阅读 · 标注 · 引用管理系统",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#d4a03a",
+  "theme_color": "#16140f",
+  "icons": [
+    {
+      "src": "/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icon-192-maskable.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "maskable"
+    },
+    {
+      "src": "/icon-512-maskable.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ]
+}

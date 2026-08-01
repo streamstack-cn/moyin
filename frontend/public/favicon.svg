@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <!-- 全出血铺满：无透明圆角，避免桌面/主屏图标露黑底 -->
+  <defs>
+    <linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#f0c26a"/>
+      <stop offset="55%" stop-color="#d4a03a"/>
+      <stop offset="100%" stop-color="#9a6b1e"/>
+    </linearGradient>
+  </defs>
+  <rect width="512" height="512" fill="url(#g)"/>
+  <!-- 字落在 maskable 安全区（中心约 80%）内 -->
+  <text
+    x="256"
+    y="348"
+    text-anchor="middle"
+    font-family="'Songti SC', 'Noto Serif SC', 'STSong', serif"
+    font-size="280"
+    font-weight="700"
+    fill="#1a1408"
+  >墨</text>
+</svg>

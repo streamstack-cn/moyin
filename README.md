@@ -39,34 +39,41 @@ docker compose up -d
 
 默认账号：`admin` /（yml 里的 `ADMIN_PASSWORD`，默认 `change_me`）
 
-> 容器与宿主机均使用 **6173**（`6173:6173`）。浏览器打开该前端地址即可，页面与 `/api` 由容器内 Nginx 一并提供。
+> 只需映射并访问 **6173**。页面和 `/api` 都由该端口提供，**不必再映射后端端口**。
 
 ```bash
 docker compose logs -f moyin   # 看日志
 docker compose down            # 停止
 ```
 
+### 部署前必读（避免「书库空了 / 封面没了 / Redis 没连上」）
+
+| 要点 | 说明 |
+|------|------|
+| **数据只在 `./config`** | Docker 把数据库、封面、转换文件全部写在宿主机 `./config`（对应容器 `/config`）。换目录启动、删掉 `config`、或挂错路径，都会看成「书库空了」。升级镜像时务必保留该目录。 |
+| **Redis 看你选哪种 Compose** | 精简版**不含** Redis（正常）；要缓存/登录限流请用标准版 `docker-compose.redis.yml`，并确认日志有 `Redis 已就绪`。 |
+| **电子书目录必须挂载且可写** | 扫描入库后，书文件路径在容器内必须仍能访问。请在 yml 中挂载源目录（读写），例如 `- /path/to/ebooks:/library-source`，并保证 `MOYIN_LIBRARY_ROOT` 与挂载点一致。删除图书会物理删除源文件。 |
+| **管理员密码只在首次生效** | `ADMIN_PASSWORD` 仅在 `./config` 里还没有用户时创建账号。已有数据库后改 yml **不会**改旧密码。 |
+| **本地开发数据 ≠ Docker 数据** | 若先用 `uvicorn` 把数据写在 `backend/data`，再改用 Docker，默认不会自动读那份库，需要自行把数据迁到 `./config`，并挂载原来的书库盘路径。 |
 
 ### Compose 文件说明
 
 | 文件 | 内容 |
 |------|------|
-| [`docker-compose.yml`](./docker-compose.yml) | 单容器，内置 SQLite，无 Redis |
-| [`docker-compose.redis.yml`](./docker-compose.redis.yml) | 应用 + Redis（数据目录 `./redis` 绑定挂载） |
+| [`docker-compose.yml`](./docker-compose.yml) | 单容器，内置 SQLite，**无 Redis** |
+| [`docker-compose.redis.yml`](./docker-compose.redis.yml) | 应用 + Redis（`./redis` 目录绑定挂载） |
 
-挂载电子书目录时须**可读写**（删除图书会物理删除源文件），在 yml 中取消注释并改路径：
-
-```yaml
-- /path/to/your/ebooks:/library-source
-```
-
-Redis 使用宿主机目录绑定（非 Docker 命名卷），默认 `./redis:/data`，可改成绝对路径，例如：
+挂载电子书目录示例（**不要加 `:ro`**）：
 
 ```yaml
-- /data/moyin-redis:/data
+volumes:
+  - ./config:/config
+  - /path/to/your/ebooks:/library-source
+environment:
+  MOYIN_LIBRARY_ROOT: /library-source
 ```
 
-应用数据在 `./config`，请勿删除。
+Redis 数据目录默认 `./redis:/data`，也可改成绝对路径。
 
 ---
 

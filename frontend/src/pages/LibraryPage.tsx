@@ -1094,10 +1094,10 @@ function DirectoryBrowser({ onPick }: { onPick: (absolutePath: string, folderNam
       ) : !data?.mount_ready ? (
         <div className="empty-state" style={{ minHeight: 120, padding: 20 }}>
           <div style={{ fontSize: 13 }}>
-            尚未检测到挂载目录（{data?.mount_root}）。请在 docker-compose.yml 中把宿主机电子书目录挂载到该路径后重启容器，例如：
+            尚未检测到挂载目录（{data?.mount_root}）。请在 docker-compose.yml 中把宿主机电子书目录以可读写方式挂载到该路径后重启容器，例如：
           </div>
           <code style={{ fontSize: 11.5, marginTop: 8, display: 'block' }}>
-            /path/to/your/ebooks:/library-source:ro
+            /path/to/your/ebooks:/library-source
           </code>
         </div>
       ) : (

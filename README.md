@@ -35,15 +35,17 @@ curl -fsSL -o docker-compose.yml \
 docker compose up -d
 ```
 
-打开：`http://<主机IP>:6173`（也可使用 `8420`）  
+**访问前端地址：** `http://<主机IP>:6173`  
+
 默认账号：`admin` /（yml 里的 `ADMIN_PASSWORD`，默认 `change_me`）
 
-> 生产镜像里前端与 API 由 Nginx 统一在容器 `8420` 提供；Compose 将宿主机 **6173** 与 **8420** 都映射到该端口。开发时的 Vite `6173` 仅用于本地 `npm run dev`，不在镜像内单独跑。
+> Compose 对外只映射 **6173**（前端入口）。浏览器请打开 `6173`，不要用 `8420`。容器内部仍由 Nginx 在同一端口提供页面与 `/api`。
 
 ```bash
 docker compose logs -f moyin   # 看日志
 docker compose down            # 停止
 ```
+
 
 ### Compose 文件说明
 

@@ -1017,7 +1017,12 @@ function EpubReaderPage({ bookId }: { bookId: string }) {
         touchEndHandler = (e: TouchEvent) => {
           if (touchHandled) return
           try {
-            const list = (rendition.getContents?.() || []) as ContentsLike[]
+            const rawContents = rendition.getContents?.() as unknown
+            const list: ContentsLike[] = Array.isArray(rawContents)
+              ? rawContents
+              : rawContents
+                ? [rawContents as ContentsLike]
+                : []
             for (const c of list) {
               if (c.window?.getSelection?.()?.toString().trim()) {
                 presentSelectionFromContents(c)
@@ -1145,7 +1150,12 @@ function EpubReaderPage({ bookId }: { bookId: string }) {
     if (!rendition || !raw) return 0
 
     type ContentsLike = { document: Document; cfiFromRange: (range: Range) => string }
-    const getContents = () => (rendition.getContents?.() || []) as ContentsLike[]
+    const getContents = (): ContentsLike[] => {
+      const raw = rendition.getContents?.() as unknown
+      if (Array.isArray(raw)) return raw as ContentsLike[]
+      if (raw) return [raw as ContentsLike]
+      return []
+    }
     const terms = highlightTerms(raw)
     const tryKeywords = terms.length ? terms : [raw]
 
@@ -1560,8 +1570,8 @@ function EpubReaderPage({ bookId }: { bookId: string }) {
     setPageInput(String(page))
     try {
       if (pageSourceRef.current === 'print') {
-        const cfi = epubBook.pageList.cfiFromPage(page)
-        if (cfi && cfi !== -1) {
+        const cfi = epubBook.pageList.cfiFromPage(page) as unknown
+        if (cfi != null && cfi !== -1 && String(cfi)) {
           renditionRef.current?.display(String(cfi))
           return
         }

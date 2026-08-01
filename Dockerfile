@@ -101,9 +101,9 @@ RUN chmod +x /entrypoint.sh
 
 RUN mkdir -p /config /app/backend/logs
 
-EXPOSE 8420
+EXPOSE 6173
 
 HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
-    CMD curl -f http://127.0.0.1:8420/api/health || exit 1
+    CMD curl -f http://127.0.0.1:6173/api/health || exit 1
 
 ENTRYPOINT ["/entrypoint.sh"]

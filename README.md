@@ -39,7 +39,7 @@ docker compose up -d
 
 默认账号：`admin` /（yml 里的 `ADMIN_PASSWORD`，默认 `change_me`）
 
-> Compose 对外只映射 **6173**（前端入口）。浏览器请打开 `6173`，不要用 `8420`。容器内部仍由 Nginx 在同一端口提供页面与 `/api`。
+> 容器与宿主机均使用 **6173**（`6173:6173`）。浏览器打开该前端地址即可，页面与 `/api` 由容器内 Nginx 一并提供。
 
 ```bash
 docker compose logs -f moyin   # 看日志

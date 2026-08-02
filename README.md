@@ -44,7 +44,16 @@
 
 ## 快速安装
 
-任选一种 Compose，**三步即可启动**（密码请先在 yml 里改掉默认值）。
+> **首次登录（请醒目记住）**
+>
+> | | |
+> |---|---|
+> | **用户名** | `admin` |
+> | **密码** | `change_me` |
+>
+> 对应 Compose 里的 `ADMIN_USERNAME` / `ADMIN_PASSWORD`。上线前请改掉默认密码；**仅第一次建库时生效**，已有 `./config` 数据后改 yml 不会覆盖旧密码。
+
+任选一种 Compose，**三步即可启动**。Windows / Mac 小白请先看文末指南：**第一步必须先安装 Docker 工具**。
 
 ### 方式 A：精简版（不含 Redis）
 
@@ -66,9 +75,7 @@ curl -fsSL -o docker-compose.yml \
 docker compose up -d
 ```
 
-**访问：** `http://<主机IP>:6173`  
-
-默认账号：`admin` /（yml 里的 `ADMIN_PASSWORD`，仓库默认是 `change_me`）
+**访问：** `http://<主机IP>:6173` → 用上面的 **`admin` / `change_me`** 登录。
 
 > 只需映射并访问 **6173**。页面和 `/api` 都走该端口，**不必再映射后端端口**。
 
@@ -164,13 +171,16 @@ cd frontend && npm ci && npm run dev   # http://127.0.0.1:6173
 
 ## 小白指南：Windows（Docker Desktop）
 
-面向第一次用 Docker 的 Windows 用户。建议系统：**Windows 10/11 64 位**，并启用 **WSL2**（Docker Desktop 默认后端）。
+面向第一次用 Docker 的 Windows 用户。建议系统：**Windows 10/11 64 位**。
 
-### 1. 安装
+> **顺序不要反：先装 Docker Desktop，再下载 Compose / 启动墨引。**  
+> 没装好 Docker 时，后面所有 `docker` 命令都会失败。
 
-1. 打开 [Docker Desktop for Windows](https://docs.docker.com/desktop/setup/install/windows-install/)，下载安装。  
-2. 安装过程若提示启用 WSL2 / 虚拟化，按提示完成并**重启**。  
-3. 启动 Docker Desktop，等到左下角变为 **Engine running**。  
+### 1. 先安装 Docker Desktop（必做第一步）
+
+1. 打开 [Docker Desktop for Windows](https://docs.docker.com/desktop/setup/install/windows-install/)，下载并安装。  
+2. 安装过程若提示启用 **WSL2** / 虚拟化，按提示完成并**重启电脑**。  
+3. 从开始菜单启动 **Docker Desktop**，等到左下角变为 **Engine running**（引擎已运行）。  
 4. 打开 PowerShell 或 Windows Terminal，确认：
 
 ```powershell
@@ -178,7 +188,7 @@ docker version
 docker compose version
 ```
 
-两条都能输出版本号即可。若提示找不到命令，把 Docker Desktop 完全退出再开一次，或把安装目录加入 PATH。
+两条都能输出版本号，才进入下一步。若提示找不到命令：把 Docker Desktop 完全退出再开一次，或检查是否已加入 PATH。
 
 ### 2. 准备目录与 Compose
 
@@ -219,6 +229,8 @@ docker compose logs -f moyin
 浏览器打开：`http://127.0.0.1:6173`  
 本机其它设备访问：`http://<这台电脑的局域网IP>:6173`（需放行防火墙入站 6173）。
 
+**首次登录：** 用户名 `admin`，密码 `change_me`（若你已在 yml 里改过 `ADMIN_PASSWORD`，则用你改后的密码）。
+
 ### 4. Windows 常见坑
 
 | 坑 | 怎么避 |
@@ -246,12 +258,15 @@ docker compose up -d
 
 ## 小白指南：Mac（OrbStack）
 
-面向第一次用容器的 Mac 用户。推荐用 **[OrbStack](https://orbstack.dev/)**（比 Docker Desktop 更轻）；命令仍是 `docker` / `docker compose`，与文档一致。Apple Silicon（M 系列）与 Intel 均可，镜像已提供 `arm64` / `amd64`。
+面向第一次用容器的 Mac 用户。推荐用 **[OrbStack](https://orbstack.dev/)**（比 Docker Desktop 更轻）；命令仍是 `docker` / `docker compose`。Apple Silicon（M 系列）与 Intel 均可。
 
-### 1. 安装 OrbStack
+> **顺序不要反：先装 OrbStack，再下载 Compose / 启动墨引。**  
+> 没装好 Docker 引擎时，后面所有 `docker` 命令都会失败。
 
-1. 打开 [orbstack.dev](https://orbstack.dev/) 下载安装并启动。  
-2. 菜单栏出现 OrbStack 图标后，打开「终端」：
+### 1. 先安装 OrbStack（必做第一步）
+
+1. 打开 [orbstack.dev](https://orbstack.dev/) 下载、安装并启动 **OrbStack**。  
+2. 菜单栏出现 OrbStack 图标、状态为运行中后，打开「终端」：
 
 ```bash
 docker version
@@ -259,7 +274,7 @@ docker compose version
 docker context show    # 一般是 orbstack
 ```
 
-若 `context` 不是 orbstack：`docker context use orbstack`。
+三条正常、且 `context` 为 `orbstack` 后，再进入下一步。若不是：`docker context use orbstack`。
 
 ### 2. 准备目录与 Compose
 
@@ -293,6 +308,8 @@ docker compose logs -f moyin
 ```
 
 浏览器：`http://127.0.0.1:6173`
+
+**首次登录：** 用户名 `admin`，密码 `change_me`（若你已在 yml 里改过 `ADMIN_PASSWORD`，则用你改后的密码）。
 
 ### 4. Mac / OrbStack 常见坑
 

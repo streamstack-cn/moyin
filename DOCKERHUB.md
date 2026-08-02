@@ -39,7 +39,16 @@ GitHub：https://github.com/streamstack-cn/moyin
 
 ## 快速安装
 
-任选一种 Compose（先改掉 yml 里的默认密码）。
+> **首次登录（请醒目记住）**
+>
+> | | |
+> |---|---|
+> | **用户名** | `admin` |
+> | **密码** | `change_me` |
+>
+> 对应 Compose 里的 `ADMIN_USERNAME` / `ADMIN_PASSWORD`。上线前请改掉；**仅第一次建库时生效**，已有 `./config` 后改 yml 不会覆盖旧密码。
+
+任选一种 Compose。Windows / Mac 小白请先看文末指南：**第一步必须先安装 Docker 工具**。
 
 ### 方式 A：精简版（不含 Redis）
 
@@ -59,8 +68,7 @@ curl -fsSL -o docker-compose.yml \
 docker compose up -d
 ```
 
-**访问：** `http://<主机IP>:6173`  
-默认账号：`admin` /（yml 的 `ADMIN_PASSWORD`，默认 `change_me`）
+**访问：** `http://<主机IP>:6173` → 用 **`admin` / `change_me`** 登录。
 
 只需映射 **6173**。页面和 `/api` 都由该端口提供。
 
@@ -135,20 +143,22 @@ docker pull streamstack/moyin:latest
 
 ## 小白指南：Windows（Docker Desktop）
 
-适合第一次用 Docker 的 Windows 用户。建议 Windows 10/11 + **WSL2**。
+适合第一次用 Docker 的 Windows 用户。建议 Windows 10/11。
 
-### 安装
+> **顺序不要反：先装 Docker Desktop，再下载 Compose / 启动墨引。**
 
-1. 安装 [Docker Desktop for Windows](https://docs.docker.com/desktop/setup/install/windows-install/)，按提示启用 WSL2 并重启。  
-2. 等到 Docker Desktop 显示 **Engine running**。  
-3. PowerShell 验证：
+### 1. 先安装 Docker Desktop（必做第一步）
+
+1. 安装 [Docker Desktop for Windows](https://docs.docker.com/desktop/setup/install/windows-install/)，按提示启用 **WSL2** 并重启。  
+2. 启动 Docker Desktop，等到显示 **Engine running**。  
+3. PowerShell 验证（两条都有版本号再往下做）：
 
 ```powershell
 docker version
 docker compose version
 ```
 
-### 部署
+### 2. 再部署墨引
 
 ```powershell
 mkdir D:\moyin\config -Force
@@ -172,7 +182,8 @@ environment:
 docker compose up -d
 ```
 
-访问 `http://127.0.0.1:6173`。
+访问 `http://127.0.0.1:6173`。  
+**首次登录：** 用户名 `admin`，密码 `change_me`。
 
 ### Windows 避坑
 
@@ -194,13 +205,22 @@ docker compose up -d
 
 推荐 [OrbStack](https://orbstack.dev/)（轻量，命令仍是 `docker` / `docker compose`）。M 系列与 Intel 均可。
 
-### 安装与部署
+> **顺序不要反：先装 OrbStack，再下载 Compose / 启动墨引。**
+
+### 1. 先安装 OrbStack（必做第一步）
+
+1. 打开 [orbstack.dev](https://orbstack.dev/) 下载、安装并启动 **OrbStack**。  
+2. 菜单栏图标为运行中后，终端验证：
 
 ```bash
 docker version
 docker compose version
-docker context use orbstack   # 若当前不是 orbstack
+docker context show    # 应为 orbstack；否则执行 docker context use orbstack
+```
 
+### 2. 再部署墨引
+
+```bash
 mkdir -p ~/moyin/config ~/moyin/redis
 cd ~/moyin
 curl -fsSL -o docker-compose.yml \
@@ -213,7 +233,8 @@ curl -fsSL -o docker-compose.yml \
 docker compose up -d
 ```
 
-访问 `http://127.0.0.1:6173`。
+访问 `http://127.0.0.1:6173`。  
+**首次登录：** 用户名 `admin`，密码 `change_me`。
 
 ### Mac / OrbStack 避坑
 

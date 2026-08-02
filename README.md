@@ -1,5 +1,7 @@
 # 墨引 MoYin
 
+当前版本：**V0.5**（镜像标签：`latest` / `0.5` / `v0.5`；版本号也显示在应用内）
+
 **私有化部署的电子书阅读 · 标注 · 引用管理系统**
 
 [![Docker Hub](https://img.shields.io/badge/Docker_Hub-streamstack%2Fmoyin-066da5?logo=docker&logoColor=white)](https://hub.docker.com/r/streamstack/moyin)
@@ -13,9 +15,36 @@
 
 ---
 
+## 主要功能
+
+| 功能 | 说明 |
+|------|------|
+| 多格式书库 | EPUB / PDF / TXT 在线读；MOBI / AZW3 / FB2 等自动转 EPUB |
+| 沉浸阅读 | 进度保存、继续阅读、返回原处、书内搜索、移动端友好 |
+| 划词工具栏 | 高亮、批注、加入引用篮 / 当场新建引用篮、脚注 |
+| 引用篮 | 多项目整理、简繁处理、Word 真脚注与去重书目导出 |
+| 首页搜索 | 书名 / 高亮 / 引用 / 正文统一检索，结果带封面缩略图 |
+| 元数据 | 豆瓣（扫码登录）与 Google Books 并行匹配封面与书目 |
+| 目录入库 | 挂载宿主机目录扫描入库（类似 Komga）；也可网页上传 |
+| 多用户 | 读书数据按账号隔离；书库全站共享（详见下节） |
+
+### 权限与数据隔离（务必读）
+
+| 范围 | 规则 |
+|------|------|
+| **所有登录用户** | 浏览书库、阅读、高亮 / 笔记 / 收藏、管理自己的引用篮、**上传电子书**（入库后全员可见） |
+| **仅管理员** | 元数据编辑与在线匹配、换封面、删书、转移书架、扫描书库、管理书库目录、管理后台（用户 / 豆瓣 / 系统配置） |
+| **按用户隔离** | 阅读进度、高亮、笔记、收藏、引用篮及其条目 |
+| **全站共享** | 书目、书架、标签、电子书文件与封面 |
+
+读者直访 `/admin` 会被拦回首页；管理接口服务端也会校验管理员身份。  
+管理员删一本书时，所有人在该书上的进度 / 高亮等关联数据会一并清理。
+
+---
+
 ## 快速安装
 
-任选一种 Compose，**三步即可启动**（密码请在 yml 里改）。
+任选一种 Compose，**三步即可启动**（密码请先在 yml 里改掉默认值）。
 
 ### 方式 A：精简版（不含 Redis）
 
@@ -23,6 +52,7 @@
 mkdir -p moyin/config && cd moyin
 curl -fsSL -o docker-compose.yml \
   https://raw.githubusercontent.com/streamstack-cn/moyin/main/docker-compose.yml
+# 编辑 docker-compose.yml：改密码，并挂载电子书目录（见下方）
 docker compose up -d
 ```
 
@@ -32,92 +62,84 @@ docker compose up -d
 mkdir -p moyin/config moyin/redis && cd moyin
 curl -fsSL -o docker-compose.yml \
   https://raw.githubusercontent.com/streamstack-cn/moyin/main/docker-compose.redis.yml
+# 编辑：ADMIN_PASSWORD、MOYIN_SECRET_KEY、Redis 密码（两处须一致）、电子书目录
 docker compose up -d
 ```
 
-**访问前端地址：** `http://<主机IP>:6173`  
+**访问：** `http://<主机IP>:6173`  
 
-默认账号：`admin` /（yml 里的 `ADMIN_PASSWORD`，默认 `change_me`）
+默认账号：`admin` /（yml 里的 `ADMIN_PASSWORD`，仓库默认是 `change_me`）
 
-> 只需映射并访问 **6173**。页面和 `/api` 都由该端口提供，**不必再映射后端端口**。
+> 只需映射并访问 **6173**。页面和 `/api` 都走该端口，**不必再映射后端端口**。
 
 ```bash
 docker compose logs -f moyin   # 看日志
-docker compose down            # 停止
+docker compose pull && docker compose up -d   # 升级镜像（保留 ./config）
+docker compose down            # 停止（不删数据）
 ```
 
-### 部署前必读（避免「书库空了 / 封面没了 / Redis 没连上」）
+### 部署前必读
 
 | 要点 | 说明 |
 |------|------|
-| **数据只在 `./config`** | Docker 把数据库、封面、转换文件全部写在宿主机 `./config`（对应容器 `/config`）。换目录启动、删掉 `config`、或挂错路径，都会看成「书库空了」。升级镜像时务必保留该目录。 |
-| **Redis 看你选哪种 Compose** | 精简版**不含** Redis（正常）；要缓存/登录限流请用标准版 `docker-compose.redis.yml`，并确认日志有 `Redis 已就绪`。 |
-| **电子书目录必须挂载且可写** | 扫描入库后，书文件路径在容器内必须仍能访问。请在 yml 中挂载源目录（读写），例如 `- /path/to/ebooks:/library-source`，并保证 `MOYIN_LIBRARY_ROOT` 与挂载点一致。删除图书会物理删除源文件。 |
-| **管理员密码只在首次生效** | `ADMIN_PASSWORD` 仅在 `./config` 里还没有用户时创建账号。已有数据库后改 yml **不会**改旧密码。 |
-| **本地开发数据 ≠ Docker 数据** | 若先用 `uvicorn` 把数据写在 `backend/data`，再改用 Docker，默认不会自动读那份库，需要自行把数据迁到 `./config`，并挂载原来的书库盘路径。 |
+| **数据只在 `./config`** | 数据库、封面、转换文件、上传书都在宿主机 `./config`（容器内 `/config`）。换目录启动、删掉 `config`、挂错路径，都会看成空库。升级镜像务必保留该目录。 |
+| **Redis 看 Compose** | 精简版不含 Redis（正常）；要缓存 / 登录限流用标准版，并确认日志有 `Redis 已就绪`。 |
+| **电子书目录必须挂载且可写** | 扫描入库后，书文件路径在容器内仍须能访问。在 yml 挂载源目录（**不要加 `:ro`**），例如 `- /path/to/ebooks:/library-source`，并保证 `MOYIN_LIBRARY_ROOT` 与挂载点一致。**删除图书会物理删除源文件。** |
+| **管理员密码只在首次生效** | `ADMIN_PASSWORD` 仅在 `./config` 里还没有用户时创建账号。已有库后改 yml **不会**改旧密码。 |
+| **本地开发 ≠ Docker 数据** | 本地 `uvicorn` 默认写 `backend/data`；Docker 用 `./config`。两套互不相通，迁移需手动拷贝并挂载原来的书库路径。 |
 
-### Compose 文件说明
+### Compose 文件
 
 | 文件 | 内容 |
 |------|------|
 | [`docker-compose.yml`](./docker-compose.yml) | 单容器，内置 SQLite，**无 Redis** |
-| [`docker-compose.redis.yml`](./docker-compose.redis.yml) | 应用 + Redis（`./redis` 目录绑定挂载） |
+| [`docker-compose.redis.yml`](./docker-compose.redis.yml) | 应用 + Redis（`./redis` 绑定挂载） |
 
-挂载电子书目录示例（**不要加 `:ro`**）：
+挂载电子书目录示例：
 
 ```yaml
 volumes:
   - ./config:/config
-  - /path/to/your/ebooks:/library-source
+  - /path/to/your/ebooks:/library-source   # 不要加 :ro
 environment:
   MOYIN_LIBRARY_ROOT: /library-source
 ```
 
-Redis 数据目录默认 `./redis:/data`，也可改成绝对路径。
-
----
-
-## 主要特点
-
-| 特点 | 说明 |
-|------|------|
-| 多格式书库 | EPUB / PDF / TXT 在线读；MOBI / AZW3 / FB2 等自动转 EPUB |
-| 沉浸阅读器 | 进度保存、继续阅读、返回原处、移动端友好 |
-| 划词工具栏 | 高亮、批注、引用篮、脚注、书内搜索 |
-| 引用篮 | 多项目、简繁、Word 真脚注与去重书目导出 |
-| 元数据 | 豆瓣 / Google Books 补全封面与书目 |
-| 目录入库 | 挂载宿主机目录扫描入库（类似 Komga） |
-| 多用户 | 进度 / 标注 / 引用篮按账号隔离；书库目录全站共享 |
-
-### 多用户隔离
-
-管理员可创建多个读者。**阅读进度、高亮、笔记、收藏、引用篮按用户隔离**；书目、书架、标签、文件全站共享。
+标准版里 Redis 密码要改两处：`redis` 服务的 `--requirepass`，以及 `REDIS_URL`（须一致）。
 
 ---
 
 ## 配置（按需）
 
-密码与密钥直接写在 Compose 的 `environment` 中即可。常用项：
+写在 Compose 的 `environment` 即可：
 
 | 变量 | 说明 |
 |------|------|
 | `ADMIN_USERNAME` / `ADMIN_PASSWORD` | 首次启动创建的管理员（库中已有用户后不覆盖） |
-| `MOYIN_SECRET_KEY` | JWT 密钥，请改成随机串 |
-| `REDIS_URL` | 仅标准版需要；与 Redis 服务密码一致 |
+| `MOYIN_SECRET_KEY` | JWT 密钥，请改成随机长串 |
+| `REDIS_URL` | 仅标准版需要；密码与 Redis `--requirepass` 一致 |
 | `MOYIN_LIBRARY_ROOT` | 目录浏览根路径，默认 `/library-source` |
 | `DATABASE_URL` | 可选，外挂 PostgreSQL；不设则用 `./config` 内 SQLite |
 | `GOOGLE_BOOKS_API_KEY` | 可选；也可在管理后台配置 |
+| `TZ` | 可选，如 `Asia/Shanghai` |
 
-豆瓣登录在**管理后台**配置，无需环境变量。
-
+豆瓣登录在**管理后台**扫码配置，无需环境变量。  
 `./config` 内主要数据：`moyin.db`、`uploads/`、`converted/`、`covers/`、`exports/`。
+
+### 首次使用建议
+
+1. 登录管理员 → 改掉默认密码（或在管理后台新建账号后停用默认策略）。  
+2. 管理后台配置豆瓣扫码（可选）与 Google API Key（可选）。  
+3. 「管理书库目录」选中已挂载文件夹创建书架并扫描；或直接「上传电子书」。  
+4. 需要多人使用时，在管理后台创建「读者」账号。
 
 ---
 
 ## 镜像
 
 - Docker Hub：[`streamstack/moyin`](https://hub.docker.com/r/streamstack/moyin)
-- 标签：`latest` · 平台：`linux/amd64`、`linux/arm64`
+- 标签：`latest` · `0.5` · `v0.5`
+- 平台：`linux/amd64`、`linux/arm64`（Intel / Apple Silicon / 常见 NAS 均可）
 - 内含：Nginx + FastAPI + Calibre + LibreOffice Writer
 
 ```bash
@@ -137,6 +159,163 @@ MOYIN_DATA_DIR=./data uvicorn main:app --host 127.0.0.1 --port 8420
 # 前端
 cd frontend && npm ci && npm run dev   # http://127.0.0.1:6173
 ```
+
+---
+
+## 小白指南：Windows（Docker Desktop）
+
+面向第一次用 Docker 的 Windows 用户。建议系统：**Windows 10/11 64 位**，并启用 **WSL2**（Docker Desktop 默认后端）。
+
+### 1. 安装
+
+1. 打开 [Docker Desktop for Windows](https://docs.docker.com/desktop/setup/install/windows-install/)，下载安装。  
+2. 安装过程若提示启用 WSL2 / 虚拟化，按提示完成并**重启**。  
+3. 启动 Docker Desktop，等到左下角变为 **Engine running**。  
+4. 打开 PowerShell 或 Windows Terminal，确认：
+
+```powershell
+docker version
+docker compose version
+```
+
+两条都能输出版本号即可。若提示找不到命令，把 Docker Desktop 完全退出再开一次，或把安装目录加入 PATH。
+
+### 2. 准备目录与 Compose
+
+PowerShell 示例（路径可改）：
+
+```powershell
+mkdir D:\moyin\config -Force
+cd D:\moyin
+# 推荐标准版（含 Redis）
+curl.exe -fsSL -o docker-compose.yml `
+  https://raw.githubusercontent.com/streamstack-cn/moyin/main/docker-compose.redis.yml
+mkdir .\redis -Force
+```
+
+用记事本 / VS Code 打开 `docker-compose.yml`：
+
+1. 把 `ADMIN_PASSWORD`、`MOYIN_SECRET_KEY`、Redis 密码（`--requirepass` 与 `REDIS_URL` 两处）改成自己的。  
+2. 挂载电子书目录。Windows 路径在 Compose 里建议写成：
+
+```yaml
+volumes:
+  - ./config:/config
+  - D:/ebooks:/library-source
+environment:
+  MOYIN_LIBRARY_ROOT: /library-source
+```
+
+也可使用 `D:\ebooks`；**推荐正斜杠 `D:/ebooks`**，少踩转义坑。
+
+### 3. 启动与访问
+
+```powershell
+cd D:\moyin
+docker compose up -d
+docker compose logs -f moyin
+```
+
+浏览器打开：`http://127.0.0.1:6173`  
+本机其它设备访问：`http://<这台电脑的局域网IP>:6173`（需放行防火墙入站 6173）。
+
+### 4. Windows 常见坑
+
+| 坑 | 怎么避 |
+|----|--------|
+| Docker 起不来 / 一直 Starting | 确认 BIOS 开了虚拟化；WSL2 已安装（`wsl --status`）；Docker Desktop → Settings → General 使用 WSL2。 |
+| `docker compose` 报错找不到 | 用 Compose V2 插件（`docker compose`，中间有空格），不要依赖旧的 `docker-compose.exe`。 |
+| 书库扫描不到文件 | 挂载路径写错，或 Docker Desktop → Settings → Resources → File sharing 未允许该盘符。改完点 Apply。 |
+| 加了 `:ro` 只读 | 删除图书、扫描同步可能失败。电子书目录请读写挂载。 |
+| 端口占用 | 6173 被占用时改 `ports` 为 `"6174:6173"`，浏览器改访问 6174。 |
+| 升级后书库空了 | 是否换了启动目录、删了 `D:\moyin\config`？数据只认你挂载的那个 `config`。 |
+| 改了 yml 密码登不进去 | 库已存在时 `ADMIN_PASSWORD` 不再生效；用原密码登录，或清库（会丢数据）重建。 |
+| 外置硬盘路径 | 盘符变化会导致容器内路径失效。尽量固定盘符，或改用稳定路径。 |
+
+### 5. 升级 / 备份
+
+```powershell
+cd D:\moyin
+docker compose pull
+docker compose up -d
+```
+
+备份：停服务后复制整个 `D:\moyin\config`（标准版可再备份 `D:\moyin\redis`）。电子书目录按你自己的盘备份。
+
+---
+
+## 小白指南：Mac（OrbStack）
+
+面向第一次用容器的 Mac 用户。推荐用 **[OrbStack](https://orbstack.dev/)**（比 Docker Desktop 更轻）；命令仍是 `docker` / `docker compose`，与文档一致。Apple Silicon（M 系列）与 Intel 均可，镜像已提供 `arm64` / `amd64`。
+
+### 1. 安装 OrbStack
+
+1. 打开 [orbstack.dev](https://orbstack.dev/) 下载安装并启动。  
+2. 菜单栏出现 OrbStack 图标后，打开「终端」：
+
+```bash
+docker version
+docker compose version
+docker context show    # 一般是 orbstack
+```
+
+若 `context` 不是 orbstack：`docker context use orbstack`。
+
+### 2. 准备目录与 Compose
+
+```bash
+mkdir -p ~/moyin/config ~/moyin/redis
+cd ~/moyin
+curl -fsSL -o docker-compose.yml \
+  https://raw.githubusercontent.com/streamstack-cn/moyin/main/docker-compose.redis.yml
+```
+
+编辑 `docker-compose.yml`：改密码；挂载电子书，例如：
+
+```yaml
+volumes:
+  - ./config:/config
+  - /Users/你的用户名/Books:/library-source
+  # 若书在外置盘，常见写法：
+  # - /Volumes/YourDisk/ebooks:/library-source
+environment:
+  MOYIN_LIBRARY_ROOT: /library-source
+```
+
+`/Users/...` 在 OrbStack 下通常可直接挂载，无需再开「文件共享」开关。
+
+### 3. 启动与访问
+
+```bash
+cd ~/moyin
+docker compose up -d
+docker compose logs -f moyin
+```
+
+浏览器：`http://127.0.0.1:6173`
+
+### 4. Mac / OrbStack 常见坑
+
+| 坑 | 怎么避 |
+|----|--------|
+| 外置盘 `/Volumes/xxx` 重启后挂不上 | 先在访达打开该磁盘再 `compose up`；盘名勿随意改。路径变了要同步改 yml 与（如有）库内历史路径。 |
+| 把 Mac 路径写成 Linux 虚拟机路径 | Compose 里的左侧是**宿主机（Mac）路径**，右侧才是容器内路径。不要写 OrbStack 机器内部的陌生路径。 |
+| 权限 / 读不到书 | 电子书目录不要加 `:ro`；确认该文件夹对当前用户可读。 |
+| 已装过 Docker Desktop 冲突 | 同一时间只用一套引擎。`docker context ls` 选 `orbstack`，或退出 Docker Desktop。 |
+| Apple Silicon 拉取很慢或架构不对 | 官方镜像已是多架构。用 `docker pull streamstack/moyin:latest`，不要强行 `--platform` 错架构。 |
+| 升级后数据没了 | 是否换了 `~/moyin` 目录？是否删了 `config`？数据只在你挂载的 `./config`。 |
+| 本机已有 Redis 想复用 | 可用 `host.docker.internal` 指向宿主机 Redis（进阶）；新手直接用仓库标准版自带 Redis 最省事。 |
+| 睡眠唤醒后容器异常 | OrbStack 一般会自动恢复；不行就 `docker compose up -d` 再拉起。 |
+
+### 5. 升级 / 备份
+
+```bash
+cd ~/moyin
+docker compose pull
+docker compose up -d
+```
+
+备份：复制整个 `~/moyin/config`（标准版可再备份 `~/moyin/redis`）。
 
 ---
 

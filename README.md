@@ -1,6 +1,6 @@
 # 墨引 MoYin
 
-当前版本：**V0.5**（镜像标签：`latest` / `0.5` / `v0.5`；版本号也显示在应用内）
+当前版本：**V0.5**（应用内显示的内部版本号；Docker 镜像只使用标签 `latest`）
 
 **私有化部署的电子书阅读 · 标注 · 引用管理系统**
 
@@ -145,7 +145,7 @@ environment:
 ## 镜像
 
 - Docker Hub：[`streamstack/moyin`](https://hub.docker.com/r/streamstack/moyin)
-- 标签：`latest` · `0.5` · `v0.5`
+- 镜像标签：仅 **`latest`**（`V0.5` 等为应用内版本号，不作为 Hub 标签）
 - 平台：`linux/amd64`、`linux/arm64`（Intel / Apple Silicon / 常见 NAS 均可）
 - 内含：Nginx + FastAPI + Calibre + LibreOffice Writer
 

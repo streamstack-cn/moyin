@@ -1,8 +1,9 @@
 import { useState, type ReactNode } from 'react'
 import { useNavigate, useLocation, Link } from 'react-router-dom'
-import { Feather, Home, LayoutGrid, LogOut, Menu, Moon, Search, ShieldCheck, Sun, X } from 'lucide-react'
+import { Feather, Home, LayoutGrid, LogOut, Menu, Moon, ShieldCheck, Sun, X } from 'lucide-react'
 import { useAuth } from '../contexts/AuthContext'
 import { useTheme } from '../contexts/ThemeContext'
+import { APP_VERSION_LABEL } from '../version'
 
 function NavItem({ to, icon, label }: { to: string; icon: ReactNode; label: string }) {
   const location = useLocation()
@@ -42,7 +43,12 @@ export default function Layout({ children }: { children: ReactNode }) {
       <aside className={`sidebar ${mobileOpen ? 'sidebar-open' : ''}`}>
         <div className="brand">
           <div className="brand-text">
-            <div className="brand-title">墨引 MoYin</div>
+            <div className="brand-title-row">
+              <div className="brand-title">墨引 MoYin</div>
+              <span className="brand-version" title={`墨引 ${APP_VERSION_LABEL}`}>
+                {APP_VERSION_LABEL}
+              </span>
+            </div>
             <div className="brand-subtitle">Reading · Notes · Citations</div>
           </div>
           <button className="icon-btn sidebar-close" onClick={() => setMobileOpen(false)} aria-label="关闭菜单">
@@ -54,30 +60,12 @@ export default function Layout({ children }: { children: ReactNode }) {
           <NavItem to="/" icon={<Home size={17} />} label="首页" />
           <NavItem to="/library" icon={<LayoutGrid size={17} />} label="书库" />
           <NavItem to="/citation" icon={<Feather size={17} />} label="引用篮" />
-          <NavItem to="/search" icon={<Search size={17} />} label="全库检索" />
           {user?.role === 'admin' && <NavItem to="/admin" icon={<ShieldCheck size={17} />} label="管理后台" />}
         </nav>
 
         <div className="sidebar-footer">
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 10px' }}>
-            <div
-              style={{
-                width: 30,
-                height: 30,
-                borderRadius: '50%',
-                background: 'var(--accent-soft)',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                fontWeight: 700,
-                color: 'var(--accent-strong)',
-                fontSize: 13,
-                flexShrink: 0,
-              }}
-            >
-              {(user?.display_name || user?.username || '?').slice(0, 1)}
-            </div>
-            <div style={{ minWidth: 0 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 10px' }}>
+            <div style={{ minWidth: 0, flex: 1 }}>
               <div style={{ fontSize: 13, fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                 {user?.display_name || user?.username}
               </div>

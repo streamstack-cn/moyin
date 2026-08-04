@@ -221,6 +221,7 @@ class CitationBasketItem(Base):
 
     quoted_text = Column(Text, default="")
     page_no = Column(String(16), default="")
+    cfi_range = Column(String(512), default="")  # 书内定位：EPUB CFI 或 pdf:#page=…
     group_name = Column(String(128), default="")  # 分组名（如"关于勇气的引用"），空字符串表示未分组
     order_index = Column(Integer, default=0)
     created_at = Column(DateTime, default=datetime.utcnow)

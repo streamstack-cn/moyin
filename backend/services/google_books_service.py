@@ -7,6 +7,7 @@ google_books_service.py — Google Books API 元数据检索
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 from typing import Any, Optional
@@ -16,6 +17,9 @@ import httpx
 logger = logging.getLogger(__name__)
 
 API_BASE = "https://www.googleapis.com/books/v1/volumes"
+# 429 日配额用尽时重试无意义；503/502 多为短暂抖动
+_RETRYABLE_STATUS = {408, 425, 500, 502, 503, 504}
+_MAX_ATTEMPTS = 3
 
 
 class GoogleBooksError(Exception):
@@ -37,14 +41,29 @@ def _pick_isbn(identifiers: list[dict]) -> str:
     return ""
 
 
+def _pick_cover(info: dict, volume_id: str) -> str:
+    """搜索接口常漏掉 imageLinks（尤其 ISBN 首条）；有 volumeId 时可拼出封面 URL。"""
+    image_links = info.get("imageLinks") or {}
+    for key in ("thumbnail", "small", "smallThumbnail", "medium", "large"):
+        cover = (image_links.get(key) or "").strip()
+        if cover:
+            return cover.replace("http://", "https://")
+    vid = (volume_id or "").strip()
+    if not vid:
+        return ""
+    # Google Books 内容图：与 API thumbnail 同源，不依赖 search 是否返回 imageLinks
+    return (
+        f"https://books.google.com/books/content?id={vid}"
+        f"&printsec=frontcover&img=1&zoom=1&source=gbs_api"
+    )
+
+
 def _normalize(item: dict) -> dict[str, Any]:
     info = item.get("volumeInfo", {}) or {}
-    image_links = info.get("imageLinks", {}) or {}
-    cover = image_links.get("thumbnail") or image_links.get("smallThumbnail") or ""
-    cover = cover.replace("http://", "https://")
+    volume_id = item.get("id", "") or ""
     return {
         "source": "google",
-        "google_books_id": item.get("id", ""),
+        "google_books_id": volume_id,
         "title": info.get("title", ""),
         "subtitle": info.get("subtitle", ""),
         "authors": info.get("authors", []) or [],
@@ -57,7 +76,7 @@ def _normalize(item: dict) -> dict[str, Any]:
         "page_count": info.get("pageCount", 0),
         "language": info.get("language", ""),
         "description": info.get("description", ""),
-        "cover_url": cover,
+        "cover_url": _pick_cover(info, volume_id),
         "rating": info.get("averageRating", 0) or 0,
         "categories": info.get("categories", []) or [],
     }
@@ -70,8 +89,10 @@ def _friendly_http_error(status: int, has_key: bool) -> str:
         return "Google Books 匿名配额不足（429），请在管理后台配置 API Key"
     if status in (401, 403):
         return "Google Books API Key 无效或未启用 Books API（401/403）"
+    if status == 503:
+        return "Google Books 暂时不可用（503），通常与网络/服务端有关，不是 API Key 配置错误，请稍后重试"
     if status >= 500:
-        return f"Google Books 服务异常（{status}）"
+        return f"Google Books 服务暂时异常（{status}），请稍后重试"
     return f"Google Books 请求失败（HTTP {status}）"
 
 
@@ -81,25 +102,50 @@ async def _request_json(params: dict[str, Any], api_key: str = "") -> dict[str, 
     if key:
         req_params["key"] = key
 
-    try:
-        async with httpx.AsyncClient(timeout=15.0, follow_redirects=True) as client:
-            resp = await client.get(API_BASE, params=req_params)
-    except httpx.TimeoutException as exc:
-        logger.warning("Google Books timeout: %s", params.get("q") or params)
-        raise GoogleBooksError("Google Books 请求超时（可能网络不可达）") from exc
-    except httpx.HTTPError as exc:
-        logger.warning("Google Books network error: %s", exc)
-        raise GoogleBooksError(f"Google Books 网络错误：{exc.__class__.__name__}") from exc
+    last_err: Optional[GoogleBooksError] = None
+    for attempt in range(1, _MAX_ATTEMPTS + 1):
+        try:
+            async with httpx.AsyncClient(timeout=20.0, follow_redirects=True) as client:
+                resp = await client.get(API_BASE, params=req_params)
+        except httpx.TimeoutException as exc:
+            last_err = GoogleBooksError("Google Books 请求超时（可能网络不可达）")
+            logger.warning("Google Books timeout attempt=%s q=%s", attempt, params.get("q") or "")
+            if attempt < _MAX_ATTEMPTS:
+                await asyncio.sleep(0.4 * attempt)
+                continue
+            raise last_err from exc
+        except httpx.HTTPError as exc:
+            last_err = GoogleBooksError(f"Google Books 网络错误：{exc.__class__.__name__}")
+            logger.warning("Google Books network error attempt=%s: %s", attempt, exc.__class__.__name__)
+            if attempt < _MAX_ATTEMPTS:
+                await asyncio.sleep(0.4 * attempt)
+                continue
+            raise last_err from exc
 
-    if resp.status_code >= 400:
+        if resp.status_code < 400:
+            try:
+                return resp.json()
+            except Exception as exc:
+                raise GoogleBooksError("Google Books 返回了无法解析的数据") from exc
+
         msg = _friendly_http_error(resp.status_code, bool(key))
-        logger.warning("Google Books HTTP %s: %s", resp.status_code, (resp.text or "")[:200])
-        raise GoogleBooksError(msg, status_code=resp.status_code)
+        logger.warning(
+            "Google Books HTTP %s attempt=%s has_key=%s body=%s",
+            resp.status_code,
+            attempt,
+            bool(key),
+            (resp.text or "")[:160],
+        )
+        last_err = GoogleBooksError(msg, status_code=resp.status_code)
+        # 鉴权错误不必重试；503/429/5xx 可退避重试
+        if resp.status_code in (401, 403) or resp.status_code not in _RETRYABLE_STATUS:
+            raise last_err
+        if attempt < _MAX_ATTEMPTS:
+            await asyncio.sleep(0.6 * attempt)
+            continue
+        raise last_err
 
-    try:
-        return resp.json()
-    except Exception as exc:
-        raise GoogleBooksError("Google Books 返回了无法解析的数据") from exc
+    raise last_err or GoogleBooksError("Google Books 请求失败")
 
 
 async def search(
@@ -127,21 +173,61 @@ async def get_volume(volume_id: str, api_key: str = "") -> Optional[dict[str, An
     if key:
         params["key"] = key
     url = f"{API_BASE}/{vid}"
-    try:
-        async with httpx.AsyncClient(timeout=15.0, follow_redirects=True) as client:
-            resp = await client.get(url, params=params)
-    except httpx.TimeoutException as exc:
-        raise GoogleBooksError("Google Books 详情请求超时") from exc
-    except httpx.HTTPError as exc:
-        raise GoogleBooksError(f"Google Books 网络错误：{exc.__class__.__name__}") from exc
+    last_err: Optional[GoogleBooksError] = None
+    for attempt in range(1, _MAX_ATTEMPTS + 1):
+        try:
+            async with httpx.AsyncClient(timeout=20.0, follow_redirects=True) as client:
+                resp = await client.get(url, params=params)
+        except httpx.TimeoutException as exc:
+            last_err = GoogleBooksError("Google Books 详情请求超时")
+            if attempt < _MAX_ATTEMPTS:
+                await asyncio.sleep(0.4 * attempt)
+                continue
+            raise last_err from exc
+        except httpx.HTTPError as exc:
+            last_err = GoogleBooksError(f"Google Books 网络错误：{exc.__class__.__name__}")
+            if attempt < _MAX_ATTEMPTS:
+                await asyncio.sleep(0.4 * attempt)
+                continue
+            raise last_err from exc
 
-    if resp.status_code == 404:
-        return None
-    if resp.status_code >= 400:
-        raise GoogleBooksError(_friendly_http_error(resp.status_code, bool(key)), status_code=resp.status_code)
-    return _normalize(resp.json())
+        if resp.status_code == 404:
+            return None
+        if resp.status_code < 400:
+            return _normalize(resp.json())
+        last_err = GoogleBooksError(
+            _friendly_http_error(resp.status_code, bool(key)), status_code=resp.status_code
+        )
+        if resp.status_code in (401, 403) or resp.status_code not in _RETRYABLE_STATUS:
+            raise last_err
+        if attempt < _MAX_ATTEMPTS:
+            await asyncio.sleep(0.6 * attempt)
+            continue
+        raise last_err
+    raise last_err or GoogleBooksError("Google Books 详情请求失败")
 
 
 async def get_by_isbn(isbn: str, api_key: str = "") -> Optional[dict[str, Any]]:
     results = await search(query="", isbn=isbn, api_key=api_key, max_results=3)
     return results[0] if results else None
+
+
+async def ping(api_key: str = "") -> dict[str, Any]:
+    """管理页连通性自检：用轻量查询验证 Key/网络。"""
+    key = resolve_api_key(api_key)
+    try:
+        hits = await search("python", api_key=key, max_results=1)
+        return {
+            "ok": True,
+            "has_api_key": bool(key),
+            "count": len(hits),
+            "message": "Google Books 可访问" + ("（已使用 API Key）" if key else "（匿名配额，不稳定）"),
+        }
+    except GoogleBooksError as exc:
+        return {
+            "ok": False,
+            "has_api_key": bool(key),
+            "count": 0,
+            "message": exc.message,
+            "status_code": exc.status_code,
+        }

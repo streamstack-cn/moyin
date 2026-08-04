@@ -36,7 +36,13 @@ def book_summary(
     progress=None,
     *,
     is_favorite: bool = False,
+    library_name: str | None = None,
 ) -> dict:
+    name = library_name
+    if name is None:
+        # relationship 已加载时直接取名，避免列表接口 N+1 时可显式传入
+        lib = getattr(book, "library", None)
+        name = lib.name if lib is not None else ""
     return {
         "id": book.id,
         "title": book.title,
@@ -57,6 +63,7 @@ def book_summary(
         "reading_percent": round(progress.percent * 100) if progress and progress.percent else 0,
         "last_read_at": progress.updated_at if progress else None,
         "library_id": book.library_id,
+        "library_name": name or "",
         "douban_id": book.douban_id or "",
         "metadata_source": book.metadata_source or "",
         "is_favorite": bool(is_favorite),
@@ -69,8 +76,11 @@ def book_detail(
     progress=None,
     *,
     is_favorite: bool = False,
+    library_name: str | None = None,
 ) -> dict:
-    data = book_summary(book, tags, progress, is_favorite=is_favorite)
+    data = book_summary(
+        book, tags, progress, is_favorite=is_favorite, library_name=library_name
+    )
     data.update(
         {
             "original_title": book.original_title,

@@ -91,10 +91,32 @@ def update_highlight(
 
 
 @router.delete("/{highlight_id}")
-def delete_highlight(highlight_id: str, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+def delete_highlight(
+    highlight_id: str,
+    also_citations: bool = True,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """删除高亮；默认同步移除引用篮中关联该高亮的条目。"""
+    from models import CitationBasketItem, CitationProject
+
     h = db.query(Highlight).filter_by(id=highlight_id, user_id=user.id).first()
     if not h:
         raise HTTPException(status_code=404, detail="高亮不存在")
+    removed_citations = 0
+    if also_citations:
+        project_ids = [
+            p.id for p in db.query(CitationProject).filter_by(user_id=user.id).all()
+        ]
+        if project_ids:
+            removed_citations = (
+                db.query(CitationBasketItem)
+                .filter(
+                    CitationBasketItem.highlight_id == highlight_id,
+                    CitationBasketItem.project_id.in_(project_ids),
+                )
+                .delete(synchronize_session=False)
+            )
     db.delete(h)
     db.commit()
-    return {"success": True}
+    return {"success": True, "removed_citations": removed_citations}

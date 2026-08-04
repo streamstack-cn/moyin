@@ -463,7 +463,9 @@ function EpubReaderPage({ bookId }: { bookId: string }) {
         // 从搜索结果点进来时，直接定位到对应高亮所在位置（该处本身已有高亮底色标记）
         // 失效 CFI 会导致 display 挂起，加超时并回退到首页
         // restart=1：重新阅读，忽略已存进度并从开头开始
-        const jumpCfi = searchParams.get('cfi')
+        // EPUB 忽略误传的 pdf: 定位（常见于只有纸书页码的旧引用）
+        const rawJump = (searchParams.get('cfi') || '').trim()
+        const jumpCfi = rawJump.startsWith('pdf:') ? '' : rawJump
         const restart = searchParams.get('restart') === '1'
         const target = jumpCfi || (restart ? undefined : progress.location) || undefined
         const displayWithTimeout = (loc?: string) =>
@@ -1226,26 +1228,51 @@ function EpubReaderPage({ bookId }: { bookId: string }) {
   }
   flashSearchKeywordRef.current = flashSearchKeyword
 
-  // 深链 ?cfi=（含搜索命中）：书内切换时压「返回原处」；有 q 时再短暂高亮
+  // 深链 ?cfi= / ?q=：定位章节并短暂高亮；EPUB 忽略误传的 pdf: 定位，改为按原文搜索
   useEffect(() => {
-    if (loading) return
-    const cfi = (searchParams.get('cfi') || '').trim()
+    if (loading || !renditionRef.current || !bookId) return
+    let cfi = (searchParams.get('cfi') || '').trim()
     const q = (searchParams.get('q') || '').trim()
-    if (!cfi || !renditionRef.current) return
+    if (cfi.startsWith('pdf:')) cfi = ''
+    if (!cfi && !q) return
     const key = `${bookId}@@${cfi}@@${q}`
     if (lastFlashKeyRef.current === key) return
     lastFlashKeyRef.current = key
     let cancelled = false
     ;(async () => {
       try {
+        let target = cfi
+        let flashQ = q
+        if (!target && q) {
+          const queries = [q.slice(0, 48), q.slice(0, 24), q.slice(0, 12)]
+            .map((s) => s.trim())
+            .filter((s, i, arr) => s.length >= 6 && arr.indexOf(s) === i)
+          for (const query of queries) {
+            if (cancelled) return
+            try {
+              const { results } = await api.get<{ results: SearchHit[] }>(
+                `/api/search/book/${bookId}?q=${encodeURIComponent(query)}`,
+              )
+              const hit = (results?.[0]?.cfi_anchor || '').trim()
+              if (hit) {
+                target = hit
+                flashQ = query
+                break
+              }
+            } catch {
+              /* try shorter */
+            }
+          }
+        }
+        if (!target || !renditionRef.current) return
         const prior = currentCfiRef.current
-        if (prior && prior !== cfi) pushNavBackPoint()
-        await renditionRef.current?.display(cfi)
+        if (prior && prior !== target) pushNavBackPoint()
+        await renditionRef.current.display(target)
         if (!renditionRef.current) return
         await waitRenditionRendered(renditionRef.current)
-        if (cancelled || !q) return
-        const n = await flashSearchKeywordRef.current(q, { refineToKeyword: true, durationMs: 4000 })
-        if (!cancelled && n === 0) toast.message('已跳转，未在当前页找到可高亮的匹配')
+        if (cancelled || !flashQ) return
+        const n = await flashSearchKeywordRef.current(flashQ, { refineToKeyword: true, durationMs: 4000 })
+        if (!cancelled && n === 0) toast.message('已跳转章节，未在当前页找到可高亮的匹配')
       } catch {
         /* ignore */
       }
@@ -1808,9 +1835,9 @@ function EpubReaderPage({ bookId }: { bookId: string }) {
     }, 0)
   }
 
-  async function addToBasket() {
+  async function addToBasket(targetProjectId?: string) {
     if (!selection) return
-    let projectId = basketProjectId || projects[0]?.id
+    let projectId = targetProjectId || basketProjectId || projects[0]?.id
     if (!projectId) {
       try {
         const created = await api.post<{ id: string; name: string }>('/api/citation/projects', {
@@ -1826,11 +1853,14 @@ function EpubReaderPage({ bookId }: { bookId: string }) {
     }
     try {
       const pageNo = basketPage.trim()
+      const cfi =
+        selection.cfiRange && !selection.cfiRange.startsWith('mobile-') ? selection.cfiRange : ''
       await api.post('/api/citation/items', {
         project_id: projectId,
         book_id: bookId,
         quoted_text: selection.text,
         page_no: pageNo,
+        cfi_range: cfi,
       })
       if (!pageNo) {
         toast.success('已加入引用篮（未填页码，导出前请补纸书页）')
@@ -1844,6 +1874,28 @@ function EpubReaderPage({ bookId }: { bookId: string }) {
       dismissSelection()
     } catch (err) {
       toast.error(err instanceof ApiError ? err.message : '存入失败')
+    }
+  }
+
+  async function addToNewBasket(name: string) {
+    if (!selection) return
+    const trimmed = name.trim()
+    if (!trimmed) {
+      toast.error('请输入引用篮名称')
+      return
+    }
+    try {
+      const created = await api.post<{ id: string; name: string }>('/api/citation/projects', {
+        name: trimmed,
+      })
+      setProjects((prev) => [
+        { id: created.id, name: created.name, script_variant: 'simplified', created_at: '' },
+        ...prev,
+      ])
+      setBasketProjectId(created.id)
+      await addToBasket(created.id)
+    } catch (err) {
+      toast.error(err instanceof ApiError ? err.message : '无法创建引用篮')
     }
   }
 
@@ -2198,6 +2250,7 @@ function EpubReaderPage({ bookId }: { bookId: string }) {
                 else toast.error('复制失败，请长按选区使用系统复制')
               }}
               onAddToBasket={() => void addToBasket()}
+              onAddToNewBasket={(name) => addToNewBasket(name)}
               onQuickFootnote={() => void copyQuickFootnote()}
               onSearchInBook={searchSelectionInBook}
               onDismiss={dismissSelection}

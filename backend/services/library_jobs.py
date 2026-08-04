@@ -26,11 +26,27 @@ WATCH_DEBOUNCE_KEY = "LIBRARY_WATCH_DEBOUNCE_SEC"
 
 def enqueue_library_scan(library_id: str, reason: str = "manual") -> None:
     """把书库扫描放入待处理集合，由后台 worker 串行执行。"""
+    # 上传抑制期间忽略监控入队，手动/定时扫描仍应放行
+    if reason == "watch":
+        try:
+            from services.library_watcher import is_library_suppressed
+
+            if is_library_suppressed(library_id):
+                logger.info("忽略监控入队（入库抑制中）library=%s", library_id)
+                return
+        except Exception:  # noqa: BLE001
+            pass
     _cancel_flag.clear()
     with _pending_lock:
         _pending.add(library_id)
         logger.info("入队扫描 library=%s reason=%s queue=%s", library_id, reason, len(_pending))
     _ensure_worker()
+
+
+def clear_pending_library(library_id: str) -> None:
+    """从扫描队列移除指定书架（不中断其他任务）。"""
+    with _pending_lock:
+        _pending.discard(library_id)
 
 
 def enqueue_scan_all(reason: str = "schedule") -> None:

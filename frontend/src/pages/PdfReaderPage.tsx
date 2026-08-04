@@ -927,9 +927,9 @@ export default function PdfReaderPage({ book }: Props) {
     setPage(nextPage)
   }
 
-  async function addToBasket() {
+  async function addToBasket(targetProjectId?: string) {
     if (!selection) return
-    let projectId = basketProjectId || projects[0]?.id
+    let projectId = targetProjectId || basketProjectId || projects[0]?.id
     if (!projectId) {
       try {
         const created = await api.post<{ id: string; name: string }>('/api/citation/projects', {
@@ -953,11 +953,34 @@ export default function PdfReaderPage({ book }: Props) {
         book_id: book.id,
         quoted_text: selection.text,
         page_no: pageNo,
+        cfi_range: selection.locator || `pdf:#page=${page}`,
       })
       toast.success('已加入引用篮')
       dismissSelection()
     } catch (err) {
       toast.error(err instanceof ApiError ? err.message : '存入失败')
+    }
+  }
+
+  async function addToNewBasket(name: string) {
+    if (!selection) return
+    const trimmed = name.trim()
+    if (!trimmed) {
+      toast.error('请输入引用篮名称')
+      return
+    }
+    try {
+      const created = await api.post<{ id: string; name: string }>('/api/citation/projects', {
+        name: trimmed,
+      })
+      setProjects((prev) => [
+        { id: created.id, name: created.name, script_variant: 'simplified', created_at: '' },
+        ...prev,
+      ])
+      setBasketProjectId(created.id)
+      await addToBasket(created.id)
+    } catch (err) {
+      toast.error(err instanceof ApiError ? err.message : '无法创建引用篮')
     }
   }
 
@@ -1265,6 +1288,7 @@ export default function PdfReaderPage({ book }: Props) {
                 else toast.error('复制失败，请长按选区使用系统复制')
               }}
               onAddToBasket={() => void addToBasket()}
+              onAddToNewBasket={(name) => addToNewBasket(name)}
               onQuickFootnote={() => void copyQuickFootnote()}
               onDismiss={dismissSelection}
               containerWidth={containerRef.current?.clientWidth || 360}

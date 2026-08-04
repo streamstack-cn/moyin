@@ -23,6 +23,20 @@ function RequireAuth({ children }: { children: React.ReactNode }) {
   return <>{children}</>
 }
 
+function RequireAdmin({ children }: { children: React.ReactNode }) {
+  const { user, loading } = useAuth()
+  if (loading) {
+    return (
+      <div className="empty-state" style={{ minHeight: '100vh' }}>
+        <div className="spinner" />
+      </div>
+    )
+  }
+  if (!user) return <Navigate to="/login" replace />
+  if (user.role !== 'admin') return <Navigate to="/" replace />
+  return <>{children}</>
+}
+
 export default function App() {
   return (
     <Routes>
@@ -39,7 +53,14 @@ export default function App() {
                 <Route path="/books/:bookId" element={<BookDetailPage />} />
                 <Route path="/citation" element={<CitationBasketPage />} />
                 <Route path="/search" element={<SearchPage />} />
-                <Route path="/admin" element={<AdminPage />} />
+                <Route
+                  path="/admin"
+                  element={
+                    <RequireAdmin>
+                      <AdminPage />
+                    </RequireAdmin>
+                  }
+                />
                 <Route path="*" element={<Navigate to="/" replace />} />
               </Routes>
             </Layout>

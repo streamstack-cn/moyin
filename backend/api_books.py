@@ -6,7 +6,7 @@ import uuid
 from pathlib import Path
 from typing import Optional
 
-from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from sqlalchemy import or_
@@ -14,9 +14,20 @@ from sqlalchemy.orm import Session
 
 import storage
 from database import get_db
-from models import Book, BookTag, ReadingProgress, Tag, User, UserFavorite
+from models import (
+    Book,
+    BookTag,
+    CitationBasketItem,
+    CitationProject,
+    Highlight,
+    Library,
+    ReadingProgress,
+    Tag,
+    User,
+    UserFavorite,
+)
 from security import get_current_user, require_admin
-from serializers import book_detail, book_summary
+from serializers import book_detail, book_summary, cover_url_for
 from services import metadata_service, progress_service, scan_service
 
 router = APIRouter(prefix="/api/books", tags=["Books"])
@@ -27,6 +38,13 @@ def _tags_of(db: Session, book_id: str) -> list[Tag]:
     if not tag_ids:
         return []
     return db.query(Tag).filter(Tag.id.in_(tag_ids)).all()
+
+
+def _library_name(db: Session, library_id: Optional[str]) -> str:
+    if not library_id:
+        return ""
+    lib = db.query(Library).filter_by(id=library_id).first()
+    return lib.name if lib else ""
 
 
 def _cleanup_orphan_tags(db: Session) -> None:
@@ -43,22 +61,130 @@ def _cleanup_orphan_tags(db: Session) -> None:
 @router.post("/upload")
 async def upload_book(
     file: UploadFile = File(...),
+    library_id: Optional[str] = Form(None),
     db: Session = Depends(get_db),
-    user: User = Depends(require_admin),
+    user: User = Depends(get_current_user),
 ):
-    suffix = Path(file.filename).suffix
+    """任意登录用户可上传电子书；入库后全站共享可见。
+
+    元数据编辑 / 在线匹配 / 删书 / 换封面 / 转移书架等仍仅管理员。
+
+    library_id 为空 / none / __none__：落入 uploads/（未归架）；
+    否则写入对应书架目录并绑定 library_id。
+    """
+    target_library_id: Optional[str] = None
+    library: Optional[Library] = None
+    raw_lib = (library_id or "").strip()
+    if raw_lib and raw_lib.lower() not in ("none", "__none__", "null"):
+        library = db.query(Library).filter_by(id=raw_lib).first()
+        if not library:
+            raise HTTPException(status_code=404, detail="目标书架不存在")
+        target_library_id = library.id
+
+    suffix = Path(file.filename or "book.bin").suffix
     with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
         content = await file.read()
         tmp.write(content)
         tmp_path = tmp.name
 
     try:
-        stored_path = scan_service.copy_upload_to_storage(tmp_path, file.filename)
-        book = await scan_service.ingest_file(db, stored_path, original_filename=file.filename)
+        # 写入受监控的书架目录前抑制 watch，避免与上传入库并发产生重复书目
+        if target_library_id:
+            from services import library_watcher
+
+            library_watcher.suppress_library_scans(target_library_id, seconds=120)
+        stored_path = scan_service.place_uploaded_file(
+            tmp_path,
+            file.filename or f"book{suffix}",
+            library_root=library.root_path if library else None,
+        )
+        book = await scan_service.ingest_file(
+            db,
+            stored_path,
+            library_id=target_library_id,
+            original_filename=file.filename,
+        )
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except NotADirectoryError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except OSError as exc:
+        raise HTTPException(status_code=500, detail=f"保存文件失败：{exc}") from exc
     finally:
         Path(tmp_path).unlink(missing_ok=True)
 
-    return book_detail(book, _tags_of(db, book.id), is_favorite=False)
+    return book_detail(
+        book,
+        _tags_of(db, book.id),
+        is_favorite=False,
+        library_name=_library_name(db, book.library_id),
+    )
+
+
+class MoveLibraryPayload(BaseModel):
+    """目标书架；null / 空字符串 / __none__ 表示转移到未归架。"""
+
+    library_id: Optional[str] = None
+
+
+@router.post("/{book_id}/move-library")
+def move_book_library(
+    book_id: str,
+    payload: MoveLibraryPayload,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_admin),
+):
+    """将书籍转移到目标书架目录，或收回未归架（uploads/）。"""
+    book = db.query(Book).filter_by(id=book_id).first()
+    if not book:
+        raise HTTPException(status_code=404, detail="书籍不存在")
+
+    raw = (payload.library_id or "").strip()
+    library: Optional[Library] = None
+    if raw and raw.lower() not in ("none", "__none__", "null"):
+        library = db.query(Library).filter_by(id=raw).first()
+        if not library:
+            raise HTTPException(status_code=404, detail="目标书架不存在")
+
+    # 已在目标归属时仍走 transfer（目录内只改归属 / 幂等）
+    target_id = library.id if library else None
+    if target_id == book.library_id and library is None:
+        return {
+            "success": True,
+            "moved": False,
+            "book": book_detail(
+                book,
+                _tags_of(db, book.id),
+                library_name="",
+            ),
+        }
+
+    try:
+        if library is not None:
+            from services import library_watcher
+
+            library_watcher.suppress_library_scans(library.id, seconds=120)
+        if book.library_id and (library is None or book.library_id != library.id):
+            from services import library_watcher
+
+            library_watcher.suppress_library_scans(book.library_id, seconds=120)
+        result = scan_service.transfer_book_file(book, library=library)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except OSError as exc:
+        raise HTTPException(status_code=500, detail=f"转移文件失败：{exc}") from exc
+
+    db.commit()
+    db.refresh(book)
+    return {
+        "success": True,
+        "moved": result.get("moved", True),
+        "book": book_detail(
+            book,
+            _tags_of(db, book.id),
+            library_name=_library_name(db, book.library_id),
+        ),
+    }
 
 
 def _progress_map(db: Session, user_id: str) -> dict:
@@ -137,7 +263,7 @@ def home_feed(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    """首页数据：继续阅读（按最近阅读时间排序）+ 最新入库（按加入时间排序）"""
+    """首页数据：继续阅读 + 最新入库 + 引用篮条目（与引用篮同源）"""
     progress_service.heal_finished_progress(db, user.id)
     progress_map = _progress_map(db, user.id)
     fav_ids = _favorite_ids(db, user.id)
@@ -172,7 +298,111 @@ def home_feed(
         for b in recent_books
     ]
 
-    return {"continue_reading": continue_reading, "recent": recent}
+    # 摘录与引用：引用篮 + 高亮，卡片用 kind 区分；已入引用篮的高亮不重复展示
+    cite_rows = (
+        db.query(CitationBasketItem, CitationProject.name)
+        .join(CitationProject, CitationProject.id == CitationBasketItem.project_id)
+        .filter(
+            CitationProject.user_id == user.id,
+            CitationBasketItem.quoted_text != "",
+            CitationBasketItem.quoted_text.isnot(None),
+        )
+        .order_by(CitationBasketItem.created_at.desc())
+        .limit(16)
+        .all()
+    )
+    linked_hl_ids = {item.highlight_id for item, _name in cite_rows if item.highlight_id}
+
+    hl_rows = (
+        db.query(Highlight)
+        .filter(
+            Highlight.user_id == user.id,
+            Highlight.quoted_text != "",
+            Highlight.quoted_text.isnot(None),
+        )
+        .order_by(Highlight.updated_at.desc())
+        .limit(16)
+        .all()
+    )
+
+    book_ids = list({item.book_id for item, _name in cite_rows} | {h.book_id for h in hl_rows})
+    books_map = (
+        {b.id: b for b in db.query(Book).filter(Book.id.in_(book_ids)).all()} if book_ids else {}
+    )
+    cite_hl_ids = [item.highlight_id for item, _name in cite_rows if item.highlight_id]
+    cite_hls = (
+        {h.id: h for h in db.query(Highlight).filter(Highlight.id.in_(cite_hl_ids)).all()}
+        if cite_hl_ids
+        else {}
+    )
+
+    snippets: list[dict] = []
+    for item, project_name in cite_rows:
+        book = books_map.get(item.book_id)
+        text = (item.quoted_text or "").strip()
+        if not text:
+            continue
+        hl = cite_hls.get(item.highlight_id) if item.highlight_id else None
+        cfi = (item.cfi_range or "").strip() or ((hl.cfi_range if hl else "") or "")
+        snippets.append(
+            {
+                "kind": "citation",
+                "id": item.id,
+                "project_id": item.project_id,
+                "project_name": (project_name or "").strip(),
+                "book_id": item.book_id,
+                "book_title": (book.title if book else "") or "",
+                "file_format": (book.file_format if book else "") or "",
+                "cover_url": cover_url_for(book) if book else "",
+                "quoted_text": text,
+                "page_no": item.page_no or "",
+                "group_name": item.group_name or "",
+                "note": "",
+                "chapter_title": (hl.chapter_title if hl else "") or "",
+                "color": (hl.color if hl else "") or "",
+                "cfi_range": cfi,
+                "highlight_id": item.highlight_id or "",
+                "created_at": item.created_at.isoformat() if item.created_at else "",
+            }
+        )
+
+    for h in hl_rows:
+        if h.id in linked_hl_ids:
+            continue
+        book = books_map.get(h.book_id)
+        text = (h.quoted_text or "").strip()
+        if not text or not book:
+            continue
+        snippets.append(
+            {
+                "kind": "highlight",
+                "id": h.id,
+                "project_id": "",
+                "project_name": "",
+                "book_id": h.book_id,
+                "book_title": book.title or "",
+                "file_format": book.file_format or "",
+                "cover_url": cover_url_for(book),
+                "quoted_text": text,
+                "page_no": h.page_no or "",
+                "group_name": "",
+                "note": h.note or "",
+                "chapter_title": h.chapter_title or "",
+                "color": h.color or "#ffd54f",
+                "cfi_range": h.cfi_range or "",
+                "highlight_id": h.id,
+                "created_at": h.updated_at.isoformat() if h.updated_at else "",
+            }
+        )
+
+    snippets.sort(key=lambda x: x.get("created_at") or "", reverse=True)
+    snippets = snippets[:16]
+
+    return {
+        "continue_reading": continue_reading,
+        "recent": recent,
+        "recent_snippets": snippets,
+    }
 
 
 def _delete_book_physical(db: Session, book: Book) -> dict:
@@ -185,6 +415,11 @@ def _delete_book_physical(db: Session, book: Book) -> dict:
             detail=f"无法删除《{book.title}》的本地文件：{original_failed[0].get('error') or book.file_path}",
         )
     db.delete(book)
+    # 再扫一遍 converted/，清掉已无书目引用的孤儿转换文件
+    try:
+        file_result["orphan_converted_removed"] = scan_service.purge_orphan_converted_files(db)
+    except Exception:  # noqa: BLE001
+        file_result["orphan_converted_removed"] = 0
     return file_result
 
 
@@ -230,6 +465,103 @@ def batch_delete_books(
     return {"success": True, "deleted": deleted, "failed": failed, "deleted_count": len(deleted)}
 
 
+async def _rematch_one_book(db: Session, book: Book) -> dict:
+    """对单本书执行自动匹配；返回 matched / error，不抛业务失败。"""
+    from services import douban_service
+
+    title = book.title or ""
+    try:
+        book.metadata_locked = False
+        meta = await metadata_service.auto_match(
+            db,
+            book.title or "",
+            book.isbn or "",
+            year=(book.pub_date or "")[:4],
+            publisher=book.publisher or "",
+            original_title=book.original_title or "",
+        )
+        if not meta:
+            db.commit()
+            return {"matched": False, "id": book.id, "title": title, "error": "未找到合适匹配"}
+        meta = {k: v for k, v in meta.items() if not str(k).startswith("_")}
+        await scan_service.apply_metadata(book, meta, db=db)
+        db.commit()
+        return {"matched": True, "id": book.id, "title": title}
+    except douban_service.DoubanRiskControlError as e:
+        db.rollback()
+        return {
+            "matched": False,
+            "id": book.id,
+            "title": title,
+            "error": str(e) or "豆瓣触发风控，请更新 Cookie",
+            "risk_control": True,
+        }
+    except Exception as e:  # noqa: BLE001
+        db.rollback()
+        return {"matched": False, "id": book.id, "title": title, "error": str(e)}
+
+
+@router.post("/batch-rematch")
+async def batch_rematch_books(
+    payload: BatchDeletePayload,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_admin),
+):
+    """批量重新匹配在线元数据（管理员）。用于「缺少信息」列表补全。"""
+    ids = [i for i in (payload.book_ids or []) if i]
+    if not ids:
+        raise HTTPException(status_code=400, detail="未选择书籍")
+    if len(ids) > 200:
+        raise HTTPException(status_code=400, detail="单次最多重新匹配 200 本")
+
+    books = db.query(Book).filter(Book.id.in_(ids)).all()
+    found = {b.id: b for b in books}
+    matched: list[str] = []
+    failed: list[dict] = []
+
+    for book_id in ids:
+        book = found.get(book_id)
+        if not book:
+            failed.append({"id": book_id, "error": "书籍不存在"})
+            continue
+        result = await _rematch_one_book(db, book)
+        if result.get("matched"):
+            matched.append(book_id)
+        else:
+            failed.append(
+                {
+                    "id": book_id,
+                    "title": result.get("title"),
+                    "error": result.get("error") or "匹配失败",
+                }
+            )
+
+    if matched:
+        _cleanup_orphan_tags(db)
+
+    return {
+        "success": True,
+        "matched": matched,
+        "failed": failed,
+        "matched_count": len(matched),
+        "failed_count": len(failed),
+    }
+
+
+@router.post("/{book_id}/rematch")
+async def rematch_book(
+    book_id: str,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_admin),
+):
+    """单本重新匹配在线元数据（管理员）。供前端进度弹窗逐本调用。"""
+    book = db.query(Book).filter_by(id=book_id).first()
+    if not book:
+        raise HTTPException(status_code=404, detail="书籍不存在")
+    result = await _rematch_one_book(db, book)
+    return {"success": True, **result}
+
+
 @router.get("/{book_id}")
 def get_book(book_id: str, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
     book = db.query(Book).filter_by(id=book_id).first()
@@ -237,7 +569,13 @@ def get_book(book_id: str, db: Session = Depends(get_db), user: User = Depends(g
         raise HTTPException(status_code=404, detail="书籍不存在")
     progress = db.query(ReadingProgress).filter_by(book_id=book_id, user_id=user.id).first()
     fav = db.query(UserFavorite).filter_by(book_id=book_id, user_id=user.id).first()
-    return book_detail(book, _tags_of(db, book.id), progress, is_favorite=bool(fav))
+    return book_detail(
+        book,
+        _tags_of(db, book.id),
+        progress,
+        is_favorite=bool(fav),
+        library_name=_library_name(db, book.library_id),
+    )
 
 
 class BookUpdatePayload(BaseModel):
@@ -443,7 +781,17 @@ async def search_metadata(
     db: Session = Depends(get_db),
     user: User = Depends(require_admin),
 ):
-    return await metadata_service.search_candidates(db, q)
+    book = db.query(Book).filter_by(id=book_id).first()
+    if not book:
+        raise HTTPException(status_code=404, detail="书籍不存在")
+    return await metadata_service.search_candidates(
+        db,
+        q,
+        year=(book.pub_date or "")[:4],
+        publisher=book.publisher or "",
+        original_title=book.original_title or "",
+        isbn=book.isbn or "",
+    )
 
 
 class ApplyMetadataPayload(BaseModel):

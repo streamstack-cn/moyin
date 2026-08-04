@@ -16,6 +16,7 @@ export interface BookSummary {
   reading_percent: number
   last_read_at: string | null
   library_id: string | null
+  library_name?: string
   douban_id?: string
   metadata_source?: string
   is_favorite?: boolean
@@ -70,6 +71,7 @@ export interface CitationItem {
   book_cover_url: string
   quoted_text: string
   page_no: string
+  cfi_range?: string
   group_name: string
   order_index: number
   created_at: string
@@ -81,9 +83,32 @@ export interface BookNote {
   updated_at: string | null
 }
 
+/** 首页「摘录与引用」：引用篮 / 高亮，用 kind 区分 */
+export interface HomeSnippet {
+  kind: 'citation' | 'highlight'
+  id: string
+  project_id: string
+  /** 引用篮名称；高亮条目为空 */
+  project_name?: string
+  book_id: string
+  book_title: string
+  file_format?: string
+  cover_url: string
+  quoted_text: string
+  page_no: string
+  group_name: string
+  note: string
+  chapter_title: string
+  color: string
+  cfi_range: string
+  highlight_id: string
+  created_at: string
+}
+
 export interface HomeFeed {
   continue_reading: BookSummary[]
   recent: BookSummary[]
+  recent_snippets?: HomeSnippet[]
 }
 
 export interface GlobalSearchBookHit {
@@ -100,6 +125,7 @@ export interface GlobalSearchHighlightHit {
   id: string
   book_id: string
   book_title: string
+  cover_url?: string
   cfi_range: string
   quoted_text: string
   note: string
@@ -113,6 +139,7 @@ export interface GlobalSearchCitationHit {
   project_name: string
   book_id: string
   book_title: string
+  cover_url?: string
   quoted_text: string
   group_name: string
   page_no: string
@@ -121,6 +148,7 @@ export interface GlobalSearchCitationHit {
 export interface GlobalSearchFulltextHit {
   book_id: string
   book_title: string
+  cover_url?: string
   chapter_title: string
   cfi_anchor: string
   snippet: string
@@ -194,6 +222,8 @@ export interface MetadataCandidate {
   translator?: string
   publisher?: string
   rating?: number
+  /** 后端匹配分，越高越靠前 */
+  _match_score?: number
 }
 
 export interface MetadataSourceStatus {
@@ -210,4 +240,11 @@ export interface MetadataSearchResponse {
     douban: MetadataSourceStatus
     google: MetadataSourceStatus
   }
+  parsed_title?: string
+  parsed_authors?: string[]
+  search_query?: string
+  /** Google 实际使用的查询词（搜索框原文） */
+  google_query?: string
+  /** api = 官方相关度顺序，未做本地打分 */
+  google_ranking?: 'api' | string
 }

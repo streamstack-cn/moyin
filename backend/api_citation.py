@@ -113,6 +113,7 @@ def _item_dict(item: CitationBasketItem, book: Optional[Book]) -> dict:
         "book_cover_url": cover_url_for(book) if book else "",
         "quoted_text": item.quoted_text,
         "page_no": item.page_no,
+        "cfi_range": item.cfi_range or "",
         "group_name": item.group_name or "",
         "order_index": item.order_index,
         "created_at": item.created_at,
@@ -150,6 +151,7 @@ class ItemPayload(BaseModel):
     book_id: str
     quoted_text: str = ""
     page_no: str = ""
+    cfi_range: str = ""
     group_name: str = ""
     highlight_id: Optional[str] = None
 
@@ -211,11 +213,25 @@ def rename_group(
 
 
 @router.delete("/items/{item_id}")
-def delete_item(item_id: str, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+def delete_item(
+    item_id: str,
+    also_highlight: bool = Query(True, description="若条目关联高亮，一并删除该书内高亮"),
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    from models import Highlight
+
     item = _get_owned_item(db, item_id, user)
+    hl_id = item.highlight_id
     db.delete(item)
+    removed_highlight = False
+    if also_highlight and hl_id:
+        hl = db.query(Highlight).filter_by(id=hl_id, user_id=user.id).first()
+        if hl:
+            db.delete(hl)
+            removed_highlight = True
     db.commit()
-    return {"success": True}
+    return {"success": True, "removed_highlight": removed_highlight}
 
 
 class ReorderPayload(BaseModel):

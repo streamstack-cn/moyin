@@ -2,6 +2,7 @@ import { useState, type MutableRefObject } from 'react'
 import {
   BookMarked,
   Copy,
+  FolderPlus,
   Highlighter,
   NotebookPen,
   Quote,
@@ -26,6 +27,7 @@ export interface SelectionBubbleProps {
   onHighlight: (color: string, note?: string) => void
   onCopy: () => void
   onAddToBasket: () => void
+  onAddToNewBasket: (name: string) => void | Promise<void>
   onQuickFootnote: () => void
   onSearchInBook?: () => void
   onDismiss: () => void
@@ -46,6 +48,7 @@ export default function SelectionBubble({
   onHighlight,
   onCopy,
   onAddToBasket,
+  onAddToNewBasket,
   onQuickFootnote,
   onSearchInBook,
   onDismiss,
@@ -55,6 +58,9 @@ export default function SelectionBubble({
 }: SelectionBubbleProps) {
   const [noteOpen, setNoteOpen] = useState(false)
   const [note, setNote] = useState('')
+  const [newBasketOpen, setNewBasketOpen] = useState(false)
+  const [newBasketName, setNewBasketName] = useState('')
+  const [creatingBasket, setCreatingBasket] = useState(false)
 
   // 松手后出现在指针右侧（placeSelectionMenu）；移动端无锚点时走底部 fallback
   const box = anchor
@@ -68,6 +74,17 @@ export default function SelectionBubble({
   function markInteracting(on: boolean) {
     if (!interactingRef) return
     interactingRef.current = on
+  }
+
+  async function submitNewBasket() {
+    const name = newBasketName.trim()
+    if (!name || creatingBasket) return
+    setCreatingBasket(true)
+    try {
+      await onAddToNewBasket(name)
+    } finally {
+      setCreatingBasket(false)
+    }
   }
 
   return (
@@ -124,6 +141,40 @@ export default function SelectionBubble({
         <Sparkles size={16} />
         <span>加入引用篮</span>
       </button>
+
+      <button
+        type="button"
+        className="selection-menu-item"
+        role="menuitem"
+        onClick={() => setNewBasketOpen((v) => !v)}
+      >
+        <FolderPlus size={16} />
+        <span>加入新增引用篮</span>
+      </button>
+      {newBasketOpen && (
+        <div className="selection-menu-note">
+          <input
+            className="selection-menu-note-input selection-menu-new-basket-input"
+            placeholder="输入新引用篮名称…"
+            value={newBasketName}
+            onChange={(e) => setNewBasketName(e.target.value)}
+            onMouseDown={(e) => e.stopPropagation()}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') void submitNewBasket()
+            }}
+            autoFocus
+          />
+          <button
+            type="button"
+            className="btn btn-sm btn-primary"
+            style={{ width: '100%', justifyContent: 'center' }}
+            disabled={creatingBasket || !newBasketName.trim()}
+            onClick={() => void submitNewBasket()}
+          >
+            {creatingBasket ? '创建中…' : '创建并加入'}
+          </button>
+        </div>
+      )}
 
       <button type="button" className="selection-menu-item" role="menuitem" onClick={onQuickFootnote}>
         <Quote size={16} />

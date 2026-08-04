@@ -1,9 +1,9 @@
 import { useEffect, useRef, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { toast } from 'sonner'
-import { BookOpenText, Download, Edit3, ImageUp, Search, Star, Trash2, Wand2 } from 'lucide-react'
+import { BookOpenText, Download, Edit3, FolderInput, ImageUp, Search, Star, Trash2, Wand2 } from 'lucide-react'
 import { api, ApiError, downloadUrl } from '../api/client'
-import type { BookDetail, MetadataCandidate, MetadataSearchResponse } from '../api/types'
+import type { BookDetail, Library, MetadataCandidate, MetadataSearchResponse } from '../api/types'
 import Modal from '../components/Modal'
 import { useAuth } from '../contexts/AuthContext'
 import { formatBadgeClass, formatLabel } from '../lib/bookFormat'
@@ -18,6 +18,10 @@ export default function BookDetailPage() {
   const [showEdit, setShowEdit] = useState(false)
   const [showMatch, setShowMatch] = useState(false)
   const [showDelete, setShowDelete] = useState(false)
+  const [showMoveLibrary, setShowMoveLibrary] = useState(false)
+  const [libraries, setLibraries] = useState<Library[]>([])
+  const [moveLibraryId, setMoveLibraryId] = useState<string>('__none__')
+  const [movingLibrary, setMovingLibrary] = useState(false)
   const [deleting, setDeleting] = useState(false)
   const [uploadingCover, setUploadingCover] = useState(false)
   const coverInputRef = useRef<HTMLInputElement>(null)
@@ -163,6 +167,22 @@ export default function BookDetailPage() {
                     <Edit3 size={16} />
                     手动编辑信息
                   </button>
+                  <button
+                    className="btn"
+                    onClick={async () => {
+                      try {
+                        const libs = await api.get<Library[]>('/api/libraries')
+                        setLibraries(libs)
+                        setMoveLibraryId(book.library_id || '__none__')
+                        setShowMoveLibrary(true)
+                      } catch (err) {
+                        toast.error(err instanceof ApiError ? err.message : '加载书架失败')
+                      }
+                    }}
+                  >
+                    <FolderInput size={16} />
+                    转移书架
+                  </button>
                   <button className="btn" onClick={() => coverInputRef.current?.click()} disabled={uploadingCover}>
                     <ImageUp size={16} />
                     {uploadingCover ? '上传中…' : '更换封面'}
@@ -206,6 +226,7 @@ export default function BookDetailPage() {
             </div>
 
             <div className="card card-pad book-detail-meta">
+              <InfoRow label="书架" value={book.library_name || '未归架'} />
               <InfoRow label="出版社" value={book.publisher} />
               <InfoRow label="出品方" value={book.producer} />
               <InfoRow label="出版地" value={book.pub_place} />
@@ -260,6 +281,74 @@ export default function BookDetailPage() {
                 {deleting ? '删除中…' : '确认删除'}
               </button>
             </div>
+          </div>
+        </Modal>
+      )}
+
+      {showMoveLibrary && (
+        <Modal
+          title="转移书架"
+          onClose={() => !movingLibrary && setShowMoveLibrary(false)}
+          width={460}
+          closeOnBackdrop={!movingLibrary}
+        >
+          <p style={{ fontSize: 13, color: 'var(--ink-dim)', lineHeight: 1.6, margin: '0 0 14px' }}>
+            当前：<strong>{book.library_name || '未归架'}</strong>
+            。转移到书架时，文件会跟着移到对应位置；选「未归架」则取消书架归属。
+          </p>
+          <div className="field">
+            <label>目标书架</label>
+            <select
+              className="input"
+              value={moveLibraryId}
+              disabled={movingLibrary}
+              onChange={(e) => setMoveLibraryId(e.target.value)}
+            >
+              <option value="__none__">未归架</option>
+              {libraries.map((lib) => (
+                <option key={lib.id} value={lib.id}>
+                  {lib.name}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, marginTop: 8 }}>
+            <button type="button" className="btn" disabled={movingLibrary} onClick={() => setShowMoveLibrary(false)}>
+              取消
+            </button>
+            <button
+              type="button"
+              className="btn btn-primary"
+              disabled={movingLibrary}
+              onClick={async () => {
+                const current = book.library_id || '__none__'
+                if (moveLibraryId === current) {
+                  setShowMoveLibrary(false)
+                  return
+                }
+                setMovingLibrary(true)
+                try {
+                  const res = await api.post<{ success: boolean; book: BookDetail }>(
+                    `/api/books/${book.id}/move-library`,
+                    { library_id: moveLibraryId === '__none__' ? null : moveLibraryId },
+                  )
+                  setBook(res.book)
+                  toast.success(
+                    res.book.library_name
+                      ? `已转移到「${res.book.library_name}」`
+                      : '已转移到未归架',
+                  )
+                  setShowMoveLibrary(false)
+                } catch (err) {
+                  toast.error(err instanceof ApiError ? err.message : '转移失败')
+                } finally {
+                  setMovingLibrary(false)
+                }
+              }}
+            >
+              <FolderInput size={15} />
+              {movingLibrary ? '转移中…' : '确认转移'}
+            </button>
           </div>
         </Modal>
       )}
@@ -382,13 +471,67 @@ function Field({
 
 type MetaSourceFilter = 'douban' | 'google'
 
+function MatchCandidateRow({
+  candidate,
+  best,
+  applying,
+  onApply,
+}: {
+  candidate: MetadataCandidate
+  best?: boolean
+  applying: boolean
+  onApply: () => void
+}) {
+  const metaBits = [
+    candidate.rating ? `${Number(candidate.rating).toFixed(1)}` : '',
+    (candidate.authors || []).join('、'),
+    candidate.translator || '',
+    candidate.publisher || '',
+    candidate.pub_date || '',
+  ].filter(Boolean)
+
+  return (
+    <div
+      className={`citation-item meta-match-item${best ? ' meta-match-item-best' : ''}`}
+      style={{ alignItems: 'center' }}
+    >
+      <div className="meta-match-cover">
+        {candidate.cover_url ? (
+          <img src={candidate.cover_url} alt="" />
+        ) : (
+          <div className="meta-match-cover-fallback" />
+        )}
+      </div>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ fontWeight: best ? 650 : 600, fontSize: best ? 14 : 13.5 }}>
+          {candidate.title}
+          {candidate.subtitle ? (
+            <span style={{ fontWeight: 400, color: 'var(--ink-faint)', marginLeft: 6 }}>
+              {candidate.subtitle}
+            </span>
+          ) : null}
+        </div>
+        <div style={{ fontSize: 12, color: 'var(--ink-faint)', marginTop: 2, lineHeight: 1.45 }}>
+          {metaBits.join(' / ')}
+        </div>
+      </div>
+      <button className={`btn btn-sm${best ? ' btn-primary' : ''}`} onClick={onApply} disabled={applying}>
+        采用
+      </button>
+    </div>
+  )
+}
+
 function MatchModal({ book, onClose, onApplied }: { book: BookDetail; onClose: () => void; onApplied: () => void }) {
   const [q, setQ] = useState(book.title)
   const [results, setResults] = useState<MetadataCandidate[]>([])
   const [sourceHints, setSourceHints] = useState<{ douban?: string; google?: string }>({})
+  const [parsedTitle, setParsedTitle] = useState('')
+  const [parsedAuthors, setParsedAuthors] = useState<string[]>([])
   const [sourceFilter, setSourceFilter] = useState<MetaSourceFilter>('douban')
   const [loading, setLoading] = useState(false)
   const [applying, setApplying] = useState(false)
+  const [hasSearched, setHasSearched] = useState(false)
 
   const doubanCount = results.filter((r) => r.source === 'douban').length
   const googleCount = results.filter((r) => r.source === 'google').length
@@ -400,6 +543,11 @@ function MatchModal({ book, onClose, onApplied }: { book: BookDetail; onClose: (
   ].filter(Boolean)
 
   async function doSearch() {
+    if (!q.trim()) {
+      toast.error('请输入搜索关键词')
+      return
+    }
+    setHasSearched(true)
     setLoading(true)
     setSourceHints({})
     try {
@@ -409,10 +557,14 @@ function MatchModal({ book, onClose, onApplied }: { book: BookDetail; onClose: (
       // 兼容旧版直接返回数组
       if (Array.isArray(r)) {
         setResults(r)
+        setParsedTitle('')
+        setParsedAuthors([])
         return
       }
       const list = r.results || []
       setResults(list)
+      setParsedTitle(r.parsed_title || r.search_query || '')
+      setParsedAuthors(r.parsed_authors || [])
       setSourceHints({
         douban: r.sources?.douban && !r.sources.douban.ok ? r.sources.douban.error || undefined : undefined,
         google: r.sources?.google && !r.sources.google.ok ? r.sources.google.error || undefined : undefined,
@@ -468,6 +620,17 @@ function MatchModal({ book, onClose, onApplied }: { book: BookDetail; onClose: (
           {loading ? '搜索中' : '搜索'}
         </button>
       </div>
+      {sourceFilter === 'douban' && ((parsedTitle && parsedTitle !== q.trim()) || parsedAuthors.length > 0) ? (
+        <div style={{ fontSize: 12.5, color: 'var(--ink-faint)', margin: '-6px 0 12px', lineHeight: 1.5 }}>
+          {parsedTitle && parsedTitle !== q.trim() ? <>豆瓣检索词：{parsedTitle}</> : null}
+          {parsedAuthors.length > 0 ? (
+            <>
+              {parsedTitle && parsedTitle !== q.trim() ? ' · ' : null}
+              作者：{parsedAuthors.join(' / ')}
+            </>
+          ) : null}
+        </div>
+      ) : null}
 
       <div className="meta-source-filter" role="tablist" aria-label="结果来源">
         {(
@@ -505,43 +668,43 @@ function MatchModal({ book, onClose, onApplied }: { book: BookDetail; onClose: (
           )}
         </div>
       )}
-      {!loading &&
-        filteredResults.map((r, i) => {
-          const metaBits = [
-            r.rating ? `${Number(r.rating).toFixed(1)}` : '',
-            (r.authors || []).join('、'),
-            r.translator || '',
-            r.publisher || '',
-            r.pub_date || '',
-          ].filter(Boolean)
-          return (
-            <div key={`${r.source}-${r.douban_id || r.google_books_id || i}`} className="citation-item" style={{ alignItems: 'center' }}>
-              <div
-                style={{
-                  width: 40,
-                  height: 56,
-                  borderRadius: 6,
-                  overflow: 'hidden',
-                  background: 'var(--bg-3)',
-                  flexShrink: 0,
-                }}
-              >
-                {r.cover_url && <img src={r.cover_url} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />}
+      {!loading && filteredResults.length > 0 && (
+        <div className="meta-match-list">
+          <div className="meta-match-section-label">
+            {sourceFilter === 'google' ? 'Google 相关度第 1 条' : '最佳匹配'}
+          </div>
+          <MatchCandidateRow
+            candidate={filteredResults[0]}
+            best
+            applying={applying}
+            onApply={() => apply(filteredResults[0])}
+          />
+          {filteredResults.length > 1 && (
+            <>
+              <div className="meta-match-section-label meta-match-section-alt">
+                {sourceFilter === 'google'
+                  ? `其余结果（${filteredResults.length - 1}）`
+                  : `备选（${filteredResults.length - 1}）`}
               </div>
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ fontWeight: 600, fontSize: 13.5 }}>{r.title}</div>
-                <div style={{ fontSize: 12, color: 'var(--ink-faint)', marginTop: 2, lineHeight: 1.45 }}>
-                  {metaBits.join(' / ')}
-                </div>
-              </div>
-              <button className="btn btn-sm btn-primary" onClick={() => apply(r)} disabled={applying}>
-                采用
-              </button>
-            </div>
-          )
-        })}
-      {!loading && results.length === 0 && <div className="empty-state">暂无结果，可尝试更换搜索词</div>}
-      {!loading && results.length > 0 && filteredResults.length === 0 && (
+              {filteredResults.slice(1).map((r, i) => (
+                <MatchCandidateRow
+                  key={`${r.source}-${r.douban_id || r.google_books_id || i}`}
+                  candidate={r}
+                  applying={applying}
+                  onApply={() => apply(r)}
+                />
+              ))}
+            </>
+          )}
+        </div>
+      )}
+      {!loading && !hasSearched && (
+        <div className="empty-state">输入关键词后点击搜索</div>
+      )}
+      {!loading && hasSearched && results.length === 0 && (
+        <div className="empty-state">暂无结果，可尝试更换搜索词</div>
+      )}
+      {!loading && hasSearched && results.length > 0 && filteredResults.length === 0 && (
         <div className="empty-state">当前来源暂无结果，可切换上方筛选</div>
       )}
     </Modal>

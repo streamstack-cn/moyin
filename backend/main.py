@@ -27,11 +27,14 @@ import api_search
 import api_tags
 from database import SessionLocal, init_db
 from security import ensure_admin_seed
+from version import APP_VERSION_LABEL, __version__
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
 logger = logging.getLogger("moyin")
+# 避免 httpx 把带 API Key 的完整 URL 打进日志
+logging.getLogger("httpx").setLevel(logging.WARNING)
 
-app = FastAPI(title="墨引 MoYin", description="电子书阅读 / 标注 / 引用管理系统", version="0.1.0")
+app = FastAPI(title="墨引 MoYin", description="电子书阅读 / 标注 / 引用管理系统", version=__version__)
 
 # 局域网 / 反向代理场景下全面放开 CORS，鉴权仍由 Bearer Token 保证
 app.add_middleware(
@@ -100,4 +103,4 @@ app.include_router(api_admin.settings_router)
 
 @app.get("/api/health")
 def health():
-    return {"status": "ok", "service": "moyin"}
+    return {"status": "ok", "service": "moyin", "version": __version__, "version_label": APP_VERSION_LABEL}

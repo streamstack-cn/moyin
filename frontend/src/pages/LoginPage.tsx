@@ -4,6 +4,7 @@ import { toast } from 'sonner'
 import { LogIn } from 'lucide-react'
 import { useAuth } from '../contexts/AuthContext'
 import { ApiError } from '../api/client'
+import { APP_VERSION_LABEL } from '../version'
 
 export default function LoginPage() {
   const { user, login, loading } = useAuth()
@@ -68,6 +69,7 @@ export default function LoginPage() {
 
         <div style={{ textAlign: 'center', fontSize: 11.5, color: 'var(--ink-faint)', marginTop: 22 }}>
           账号由管理员创建，不支持自助注册
+          <div style={{ marginTop: 8, letterSpacing: '0.04em' }}>{APP_VERSION_LABEL}</div>
         </div>
       </div>
     </div>

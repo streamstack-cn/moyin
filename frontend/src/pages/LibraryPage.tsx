@@ -9,15 +9,19 @@ import {
   FolderPlus,
   LayoutGrid,
   Layers,
+  Loader2,
   RefreshCw,
   Search,
+  Square,
   Tags,
   Trash2,
   UploadCloud,
+  Wand2,
 } from 'lucide-react'
 import { api, ApiError } from '../api/client'
 import type { BookSummary, BrowseResult, Library, Tag } from '../api/types'
 import BookCard from '../components/BookCard'
+import ConfirmDialog from '../components/ConfirmDialog'
 import Modal from '../components/Modal'
 import { useAuth } from '../contexts/AuthContext'
 
@@ -44,6 +48,24 @@ interface BookSection {
 const GROUP_MODE_KEY = 'moyin_library_group_mode'
 const COLLAPSED_KEY = 'moyin_library_collapsed'
 const BATCH_SELECT_KEY = 'moyin_batch_select_missing'
+/** 单次批量重新匹配上限（与后端一致） */
+const BATCH_REMATCH_LIMIT = 200
+
+type BatchPhase = 'running' | 'stopping' | 'done' | 'stopped'
+type BatchKind = 'rematch' | 'delete'
+
+interface BatchProgressJob {
+  kind: BatchKind
+  phase: BatchPhase
+  total: number
+  success: number
+  failed: number
+  currentTitle: string
+  /** 尚未处理完的 id（含当前正在处理的） */
+  remainingIds: string[]
+  /** 失败的 id，结束后保留勾选 */
+  failedIds: string[]
+}
 
 function loadBatchSelection(): Set<string> {
   try {
@@ -109,6 +131,10 @@ export default function LibraryPage() {
   const metaFilter = searchParams.get('meta') || ''
   const [loading, setLoading] = useState(true)
   const [showLibraryModal, setShowLibraryModal] = useState(false)
+  const [showUploadModal, setShowUploadModal] = useState(false)
+  const [uploadFile, setUploadFile] = useState<File | null>(null)
+  const [uploadLibraryId, setUploadLibraryId] = useState<string>('__none__')
+  const [uploading, setUploading] = useState(false)
   const [scanningAll, setScanningAll] = useState(false)
   const [scanBusy, setScanBusy] = useState(false)
   const [stoppingScan, setStoppingScan] = useState(false)
@@ -118,10 +144,15 @@ export default function LibraryPage() {
     searchParams.get('meta') === 'missing_douban' ? loadBatchSelection() : new Set(),
   )
   const [showBatchDelete, setShowBatchDelete] = useState(false)
-  const [batchDeleting, setBatchDeleting] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const softWatchTimerRef = useRef<number | null>(null)
-  const canBatchDelete = user?.role === 'admin' && metaFilter === 'missing_douban'
+  const batchStopRef = useRef(false)
+  const [batchJob, setBatchJob] = useState<BatchProgressJob | null>(null)
+  const canBatchActions = user?.role === 'admin' && metaFilter === 'missing_douban'
+  const canBatchDelete = canBatchActions
+  const batchBusy = Boolean(batchJob && (batchJob.phase === 'running' || batchJob.phase === 'stopping'))
+  const batchRematching = Boolean(batchBusy && batchJob?.kind === 'rematch')
+  const batchDeleting = Boolean(batchBusy && batchJob?.kind === 'delete')
 
   async function refresh(opts?: { silent?: boolean }) {
     if (!opts?.silent) setLoading(true)
@@ -234,6 +265,7 @@ export default function LibraryPage() {
   }
 
   function toggleSelect(bookId: string) {
+    if (batchBusy) return
     setSelectedIds((prev) => {
       const next = new Set(prev)
       if (next.has(bookId)) next.delete(bookId)
@@ -243,42 +275,209 @@ export default function LibraryPage() {
   }
 
   function selectAllMissing() {
+    if (batchBusy) return
     setSelectedIds(new Set(filteredBooks.map((b) => b.id)))
   }
 
   function clearSelection() {
+    if (batchBusy) return
     setSelectedIds(new Set())
     clearBatchSelectionStorage()
   }
 
-  async function batchDeleteSelected() {
-    if (!selectedIds.size || batchDeleting) return
-    setBatchDeleting(true)
-    try {
-      const res = await api.post<{
-        deleted_count: number
-        failed: { id: string; title?: string; error: string }[]
-      }>('/api/books/batch-delete', { book_ids: [...selectedIds] })
-      const failed = res.failed?.length || 0
-      if (res.deleted_count > 0) {
-        toast.success(
-          failed
-            ? `已删除 ${res.deleted_count} 本，${failed} 本失败`
-            : `已删除 ${res.deleted_count} 本（含本地文件）`,
-        )
-      } else {
-        toast.error(res.failed?.[0]?.error || '删除失败')
-      }
-      setShowBatchDelete(false)
-      setSelectedIds(new Set())
-      clearBatchSelectionStorage()
-      await refresh({ silent: true })
-      api.get<Stats>('/api/admin/stats').then(setStats).catch(() => {})
-    } catch (err) {
-      toast.error(err instanceof ApiError ? err.message : '批量删除失败')
-    } finally {
-      setBatchDeleting(false)
+  function closeBatchModal() {
+    if (batchBusy) return
+    setBatchJob(null)
+  }
+
+  function stopBatchJob() {
+    if (!batchJob || batchJob.phase !== 'running') return
+    batchStopRef.current = true
+    setBatchJob((prev) => (prev ? { ...prev, phase: 'stopping' } : prev))
+  }
+
+  function orderedSelectedIds() {
+    const ordered = filteredBooks.map((b) => b.id).filter((id) => selectedIds.has(id))
+    const inList = new Set(ordered)
+    for (const id of selectedIds) {
+      if (!inList.has(id)) ordered.push(id)
     }
+    return ordered
+  }
+
+  async function batchDeleteSelected() {
+    if (!selectedIds.size || batchBusy) return
+    const ids = orderedSelectedIds()
+    if (!ids.length) return
+
+    const titleById = new Map(filteredBooks.map((b) => [b.id, b.title]))
+    setShowBatchDelete(false)
+    batchStopRef.current = false
+    setBatchJob({
+      kind: 'delete',
+      phase: 'running',
+      total: ids.length,
+      success: 0,
+      failed: 0,
+      currentTitle: titleById.get(ids[0]) || '',
+      remainingIds: [...ids],
+      failedIds: [],
+    })
+
+    let success = 0
+    let failed = 0
+    const failedIds: string[] = []
+    const skippedIds: string[] = []
+
+    for (let i = 0; i < ids.length; i++) {
+      if (batchStopRef.current) {
+        skippedIds.push(...ids.slice(i))
+        break
+      }
+      const id = ids[i]
+      const title = titleById.get(id) || ''
+      setBatchJob((prev) =>
+        prev
+          ? {
+              ...prev,
+              phase: batchStopRef.current ? 'stopping' : 'running',
+              currentTitle: title,
+              remainingIds: ids.slice(i),
+              success,
+              failed,
+              failedIds: [...failedIds],
+            }
+          : prev,
+      )
+
+      try {
+        await api.delete(`/api/books/${id}`)
+        success += 1
+        setBooks((prev) => prev.filter((b) => b.id !== id))
+        setSelectedIds((prev) => {
+          const next = new Set(prev)
+          next.delete(id)
+          return next
+        })
+      } catch {
+        failed += 1
+        failedIds.push(id)
+      }
+    }
+
+    const stopped = batchStopRef.current
+    const keepIds = [...failedIds, ...skippedIds]
+    setSelectedIds(new Set(keepIds))
+    if (keepIds.length === 0) clearBatchSelectionStorage()
+
+    setBatchJob({
+      kind: 'delete',
+      phase: stopped ? 'stopped' : 'done',
+      total: ids.length,
+      success,
+      failed,
+      currentTitle: '',
+      remainingIds: skippedIds,
+      failedIds,
+    })
+
+    await refresh({ silent: true })
+    api.get<Stats>('/api/admin/stats').then(setStats).catch(() => {})
+  }
+
+  async function batchRematchSelected() {
+    if (!selectedIds.size || batchBusy) return
+    let ids = orderedSelectedIds()
+    if (ids.length > BATCH_REMATCH_LIMIT) {
+      ids = ids.slice(0, BATCH_REMATCH_LIMIT)
+      setSelectedIds(new Set(ids))
+      toast.warning(
+        `单次最多匹配 ${BATCH_REMATCH_LIMIT} 本，已保留列表前 ${BATCH_REMATCH_LIMIT} 本并取消其余勾选`,
+      )
+    }
+    if (!ids.length) return
+
+    const titleById = new Map(filteredBooks.map((b) => [b.id, b.title]))
+    batchStopRef.current = false
+    setBatchJob({
+      kind: 'rematch',
+      phase: 'running',
+      total: ids.length,
+      success: 0,
+      failed: 0,
+      currentTitle: titleById.get(ids[0]) || '',
+      remainingIds: [...ids],
+      failedIds: [],
+    })
+
+    let success = 0
+    let failed = 0
+    const failedIds: string[] = []
+    const skippedIds: string[] = []
+
+    for (let i = 0; i < ids.length; i++) {
+      if (batchStopRef.current) {
+        skippedIds.push(...ids.slice(i))
+        break
+      }
+      const id = ids[i]
+      const title = titleById.get(id) || ''
+      setBatchJob((prev) =>
+        prev
+          ? {
+              ...prev,
+              phase: batchStopRef.current ? 'stopping' : 'running',
+              currentTitle: title,
+              remainingIds: ids.slice(i),
+              success,
+              failed,
+              failedIds: [...failedIds],
+            }
+          : prev,
+      )
+
+      try {
+        const res = await api.post<{
+          matched: boolean
+          title?: string
+          error?: string
+          risk_control?: boolean
+        }>(`/api/books/${id}/rematch`)
+        if (res.matched) success += 1
+        else {
+          failed += 1
+          failedIds.push(id)
+          if (res.risk_control || (res.error && res.error.includes('风控'))) {
+            batchStopRef.current = true
+            toast.warning(res.error || '豆瓣触发风控，已停止后续匹配。请更新 Cookie 后重试。')
+            skippedIds.push(...ids.slice(i + 1))
+            break
+          }
+        }
+      } catch {
+        failed += 1
+        failedIds.push(id)
+      }
+    }
+
+    const stopped = batchStopRef.current
+    const keepIds = [...failedIds, ...skippedIds]
+    setSelectedIds(new Set(keepIds))
+    if (keepIds.length === 0) clearBatchSelectionStorage()
+
+    setBatchJob({
+      kind: 'rematch',
+      phase: stopped ? 'stopped' : 'done',
+      total: ids.length,
+      success,
+      failed,
+      currentTitle: '',
+      remainingIds: skippedIds,
+      failedIds,
+    })
+
+    await refresh({ silent: true })
+    api.get<Stats>('/api/admin/stats').then(setStats).catch(() => {})
   }
 
   function onFavoriteChange(bookId: string, isFavorite: boolean) {
@@ -392,58 +591,164 @@ export default function LibraryPage() {
           <div className="page-title">我的书库</div>
           <div className="page-subtitle">按书架与标签浏览 · 标注 · 沉淀写作引用</div>
         </div>
-        {user?.role === 'admin' && (
-          <div className="library-topbar-actions">
-            <button className="btn" onClick={scanAllLibraries} disabled={scanningAll || scanBusy} title="扫描全部书库目录并同步增删">
-              <RefreshCw size={16} className={scanningAll || scanBusy ? 'spin' : undefined} />
-              <span className="btn-label-full">{scanningAll || scanBusy ? '扫描中…' : '扫描书库'}</span>
-              <span className="btn-label-short">{scanningAll || scanBusy ? '扫描中' : '扫描'}</span>
-            </button>
-            {(scanBusy || stoppingScan) && (
-              <button
-                className="btn btn-danger"
-                onClick={stopScan}
-                disabled={stoppingScan}
-                title="立刻清空排队并中止当前扫描，避免大库继续入库"
-              >
-                <span className="btn-label-full">{stoppingScan ? '停止中…' : '停止扫描'}</span>
-                <span className="btn-label-short">{stoppingScan ? '停止中' : '停止'}</span>
+        <div className="library-topbar-actions">
+          {user?.role === 'admin' && (
+            <>
+              <button className="btn" onClick={scanAllLibraries} disabled={scanningAll || scanBusy} title="扫描全部书库目录并同步增删">
+                <RefreshCw size={16} className={scanningAll || scanBusy ? 'spin' : undefined} />
+                <span className="btn-label-full">{scanningAll || scanBusy ? '扫描中…' : '扫描书库'}</span>
+                <span className="btn-label-short">{scanningAll || scanBusy ? '扫描中' : '扫描'}</span>
               </button>
-            )}
-            <button className="btn" onClick={() => setShowLibraryModal(true)} title="管理书库目录">
-              <FolderPlus size={16} />
-              <span className="btn-label-full">管理书库目录</span>
-              <span className="btn-label-short">目录</span>
-            </button>
-            <button className="btn btn-primary" onClick={() => fileInputRef.current?.click()} title="上传电子书">
-              <UploadCloud size={16} />
-              <span className="btn-label-full">上传电子书</span>
-              <span className="btn-label-short">上传</span>
-            </button>
-            <input
-              ref={fileInputRef}
-              type="file"
-              hidden
-              accept=".epub,.pdf,.mobi,.azw3,.azw,.fb2,.txt,.cbz,.cbr"
-              onChange={async (e) => {
-                const file = e.target.files?.[0]
-                e.target.value = ''
-                if (!file) return
-                const formData = new FormData()
-                formData.append('file', file)
-                const tId = toast.loading(`正在导入《${file.name}》…`)
-                try {
-                  await api.upload('/api/books/upload', formData)
-                  toast.success('导入成功', { id: tId })
-                  refresh()
-                } catch (err) {
-                  toast.error(err instanceof ApiError ? err.message : '导入失败', { id: tId })
-                }
-              }}
-            />
-          </div>
-        )}
+              {(scanBusy || stoppingScan) && (
+                <button
+                  className="btn btn-danger"
+                  onClick={stopScan}
+                  disabled={stoppingScan}
+                  title="立刻清空排队并中止当前扫描，避免大库继续入库"
+                >
+                  <span className="btn-label-full">{stoppingScan ? '停止中…' : '停止扫描'}</span>
+                  <span className="btn-label-short">{stoppingScan ? '停止中' : '停止'}</span>
+                </button>
+              )}
+              <button className="btn" onClick={() => setShowLibraryModal(true)} title="管理书库目录">
+                <FolderPlus size={16} />
+                <span className="btn-label-full">管理书库目录</span>
+                <span className="btn-label-short">目录</span>
+              </button>
+            </>
+          )}
+          <button
+            className="btn btn-primary"
+            onClick={() => {
+              setUploadFile(null)
+              setUploadLibraryId(
+                activeLibrary && activeLibrary !== '__none__' ? activeLibrary : '__none__',
+              )
+              setShowUploadModal(true)
+            }}
+            title="上传电子书（入库后全员可见）"
+          >
+            <UploadCloud size={16} />
+            <span className="btn-label-full">上传电子书</span>
+            <span className="btn-label-short">上传</span>
+          </button>
+          <input
+            ref={fileInputRef}
+            type="file"
+            hidden
+            accept=".epub,.pdf,.mobi,.azw3,.azw,.fb2,.txt,.cbz,.cbr"
+            onChange={(e) => {
+              const file = e.target.files?.[0]
+              e.target.value = ''
+              if (file) setUploadFile(file)
+            }}
+          />
+        </div>
       </div>
+
+      {showUploadModal && (
+        <Modal
+          title="上传电子书"
+          onClose={() => !uploading && setShowUploadModal(false)}
+          width={460}
+          closeOnBackdrop={!uploading}
+        >
+          <div className={`upload-modal-body${uploading ? ' is-uploading' : ''}`}>
+            <div className="field">
+              <label>文件</label>
+              <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+                <button
+                  type="button"
+                  className="btn"
+                  disabled={uploading}
+                  onClick={() => fileInputRef.current?.click()}
+                >
+                  选择文件
+                </button>
+                <span style={{ fontSize: 13, color: 'var(--ink-dim)', wordBreak: 'break-all' }}>
+                  {uploadFile ? uploadFile.name : '尚未选择'}
+                </span>
+              </div>
+            </div>
+            <div className="field">
+              <label>目标书架</label>
+              <select
+                className="input"
+                value={uploadLibraryId}
+                disabled={uploading}
+                onChange={(e) => setUploadLibraryId(e.target.value)}
+              >
+                <option value="__none__">未归架</option>
+                {libraries.map((lib) => (
+                  <option key={lib.id} value={lib.id}>
+                    {lib.name}
+                  </option>
+                ))}
+              </select>
+              <div style={{ fontSize: 12, color: 'var(--ink-faint)', marginTop: 6, lineHeight: 1.55 }}>
+                选择书架后，文件会放入该书架并自动归类；选「未归架」则先不指定书架。
+              </div>
+            </div>
+
+            {uploading && (
+              <div className="upload-progress" role="status" aria-live="polite">
+                <div className="upload-progress-icon">
+                  <Loader2 size={22} className="spin" />
+                </div>
+                <div className="upload-progress-text">
+                  <div className="upload-progress-title">正在上传并导入…</div>
+                  <div className="upload-progress-sub">
+                    {uploadFile?.name ? `《${uploadFile.name}》` : '请稍候'}
+                    ，大文件或需转换时可能稍慢
+                  </div>
+                </div>
+                <div className="upload-progress-bar" aria-hidden="true">
+                  <span className="upload-progress-bar-indeterminate" />
+                </div>
+              </div>
+            )}
+
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, marginTop: 8 }}>
+              <button type="button" className="btn" disabled={uploading} onClick={() => setShowUploadModal(false)}>
+                取消
+              </button>
+              <button
+                type="button"
+                className="btn btn-primary"
+                disabled={uploading || !uploadFile}
+                onClick={async () => {
+                  if (!uploadFile) return
+                  setUploading(true)
+                  const formData = new FormData()
+                  formData.append('file', uploadFile)
+                  if (uploadLibraryId && uploadLibraryId !== '__none__') {
+                    formData.append('library_id', uploadLibraryId)
+                  }
+                  const tId = toast.loading(`正在导入《${uploadFile.name}》…`)
+                  try {
+                    await api.upload('/api/books/upload', formData)
+                    const shelf =
+                      uploadLibraryId === '__none__'
+                        ? '未归架'
+                        : libraries.find((l) => l.id === uploadLibraryId)?.name || '目标书架'
+                    toast.success(`导入成功 · ${shelf}`, { id: tId })
+                    setShowUploadModal(false)
+                    setUploadFile(null)
+                    refresh()
+                  } catch (err) {
+                    toast.error(err instanceof ApiError ? err.message : '导入失败', { id: tId })
+                  } finally {
+                    setUploading(false)
+                  }
+                }}
+              >
+                {uploading ? <Loader2 size={15} className="spin" /> : <UploadCloud size={15} />}
+                {uploading ? '上传中…' : '开始上传'}
+              </button>
+            </div>
+          </div>
+        </Modal>
+      )}
 
       <div className="page-content">
         <div className="stat-strip" aria-label="书库概览">
@@ -500,34 +805,58 @@ export default function LibraryPage() {
             <div>
               <strong>缺少信息</strong>
               <span>
-                {canBatchDelete
-                  ? '点封面即可勾选/取消；勾选会保留，从详情返回后仍在。需要编辑时点封面左下角「详情」'
+                {canBatchActions
+                  ? '点封面勾选书籍，可批量重新匹配或删除；需要细调时点封面左下角「详情」'
                   : '点封面进入详情，可「匹配豆瓣」或「手动编辑信息」'}
               </span>
             </div>
             <div className="library-meta-banner-actions">
-              {canBatchDelete && filteredBooks.length > 0 && (
+              {canBatchActions && filteredBooks.length > 0 && (
                 <>
-                  <button type="button" className="btn btn-sm" onClick={selectAllMissing}>
+                  <button
+                    type="button"
+                    className="btn btn-sm"
+                    disabled={batchBusy}
+                    onClick={selectAllMissing}
+                  >
                     全选（{filteredBooks.length}）
                   </button>
                   {selectedIds.size > 0 && (
-                    <button type="button" className="btn btn-sm" onClick={clearSelection}>
+                    <button
+                      type="button"
+                      className="btn btn-sm"
+                      disabled={batchBusy}
+                      onClick={clearSelection}
+                    >
                       取消选择
                     </button>
                   )}
                   <button
                     type="button"
+                    className="btn btn-sm btn-primary"
+                    disabled={!selectedIds.size || batchBusy}
+                    onClick={() => void batchRematchSelected()}
+                    title="按书名自动匹配豆瓣 / Google 元数据"
+                  >
+                    {batchRematching ? (
+                      <Loader2 size={14} className="spin" />
+                    ) : (
+                      <Wand2 size={14} />
+                    )}
+                    {batchRematching ? '匹配中…' : `重新匹配（${selectedIds.size}）`}
+                  </button>
+                  <button
+                    type="button"
                     className="btn btn-sm btn-danger"
-                    disabled={!selectedIds.size}
+                    disabled={!selectedIds.size || batchBusy}
                     onClick={() => setShowBatchDelete(true)}
                   >
-                    <Trash2 size={14} />
-                    删除所选（{selectedIds.size}）
+                    {batchDeleting ? <Loader2 size={14} className="spin" /> : <Trash2 size={14} />}
+                    {batchDeleting ? '删除中…' : `删除所选（${selectedIds.size}）`}
                   </button>
                 </>
               )}
-              <button type="button" className="btn btn-sm" onClick={() => setMetaFilter('')}>
+              <button type="button" className="btn btn-sm" disabled={batchBusy} onClick={() => setMetaFilter('')}>
                 清除筛选
               </button>
             </div>
@@ -690,12 +1019,11 @@ export default function LibraryPage() {
         )}
       </div>
 
-      {showBatchDelete && (
+      {showBatchDelete && !batchDeleting && (
         <Modal
           title="批量删除书籍"
-          onClose={() => !batchDeleting && setShowBatchDelete(false)}
+          onClose={() => setShowBatchDelete(false)}
           width={440}
-          closeOnBackdrop={!batchDeleting}
         >
           <div className="confirm-dialog">
             <div className="confirm-dialog-lead">
@@ -705,15 +1033,29 @@ export default function LibraryPage() {
               将同时删除书库中的本地原文件，以及封面 / 转换副本。此操作不可撤销，重新扫描也不会再找回这些文件。
             </p>
             <div className="confirm-dialog-actions">
-              <button className="btn" type="button" disabled={batchDeleting} onClick={() => setShowBatchDelete(false)}>
+              <button className="btn" type="button" onClick={() => setShowBatchDelete(false)}>
                 取消
               </button>
-              <button className="btn btn-danger" type="button" disabled={batchDeleting} onClick={batchDeleteSelected}>
+              <button className="btn btn-danger" type="button" onClick={() => void batchDeleteSelected()}>
                 <Trash2 size={15} />
-                {batchDeleting ? '删除中…' : '确认删除'}
+                确认删除
               </button>
             </div>
           </div>
+        </Modal>
+      )}
+
+      {batchJob && (
+        <Modal
+          title={batchJob.kind === 'delete' ? '批量删除' : '重新匹配'}
+          onClose={() => {
+            if (batchBusy) stopBatchJob()
+            else closeBatchModal()
+          }}
+          width={440}
+          closeOnBackdrop={!batchBusy}
+        >
+          <BatchProgressPanel job={batchJob} onStop={stopBatchJob} onClose={closeBatchModal} />
         </Modal>
       )}
 
@@ -728,6 +1070,114 @@ export default function LibraryPage() {
         />
       )}
     </>
+  )
+}
+
+function BatchProgressPanel({
+  job,
+  onStop,
+  onClose,
+}: {
+  job: BatchProgressJob
+  onStop: () => void
+  onClose: () => void
+}) {
+  const isDelete = job.kind === 'delete'
+  const done = job.success + job.failed
+  const inFlight = job.phase === 'running' || job.phase === 'stopping' ? job.remainingIds.length : 0
+  const pct = job.total > 0 ? Math.min(100, Math.round((done / job.total) * 100)) : 0
+  const running = job.phase === 'running' || job.phase === 'stopping'
+
+  const title =
+    job.phase === 'stopping'
+      ? '正在停止…'
+      : job.phase === 'stopped'
+        ? isDelete
+          ? '已停止删除'
+          : '已停止匹配'
+        : job.phase === 'done'
+          ? isDelete
+            ? '删除完成'
+            : '匹配完成'
+          : isDelete
+            ? '正在删除…'
+            : '正在重新匹配…'
+
+  const sub =
+    running && job.currentTitle
+      ? `当前：《${job.currentTitle}》`
+      : job.phase === 'stopped'
+        ? `未处理 ${job.remainingIds.length} 本已保留勾选，可继续操作`
+        : job.phase === 'done'
+          ? job.failed > 0
+            ? isDelete
+              ? '删除失败的书仍保留勾选'
+              : '未匹配成功的书仍保留勾选'
+            : '所选书籍已全部处理完毕'
+          : `共 ${job.total} 本，请稍候`
+
+  const pendingLabel = running ? (isDelete ? '删除中' : '匹配中') : '未处理'
+  const stopLabel = job.phase === 'stopping' ? '停止中…' : isDelete ? '停止删除' : '停止匹配'
+
+  return (
+    <div className="rematch-progress" role="status" aria-live="polite">
+      <div className="upload-progress">
+        <div className="upload-progress-icon">
+          {running ? (
+            <Loader2 size={22} className="spin" />
+          ) : isDelete ? (
+            <Trash2 size={22} />
+          ) : (
+            <Wand2 size={22} />
+          )}
+        </div>
+        <div className="upload-progress-text">
+          <div className="upload-progress-title">{title}</div>
+          <div className="upload-progress-sub">{sub}</div>
+        </div>
+        <div className="upload-progress-bar rematch-progress-bar" aria-hidden="true">
+          <span className="rematch-progress-bar-fill" style={{ width: `${pct}%` }} />
+        </div>
+      </div>
+
+      <div className="rematch-stats" aria-label={isDelete ? '删除进度' : '匹配进度'}>
+        <div className="rematch-stat">
+          <div className="rematch-stat-value is-ok">{job.success}</div>
+          <div className="rematch-stat-label">{isDelete ? '已删除' : '已成功'}</div>
+        </div>
+        <div className="rematch-stat">
+          <div className="rematch-stat-value is-fail">{job.failed}</div>
+          <div className="rematch-stat-label">已失败</div>
+        </div>
+        <div className="rematch-stat">
+          <div className="rematch-stat-value is-pending">{inFlight}</div>
+          <div className="rematch-stat-label">{pendingLabel}</div>
+        </div>
+      </div>
+
+      <div className="rematch-progress-meta">
+        进度 {done}/{job.total}
+        {job.total > 0 ? ` · ${pct}%` : ''}
+      </div>
+
+      <div className="confirm-dialog-actions" style={{ marginTop: 18 }}>
+        {running ? (
+          <button
+            type="button"
+            className="btn"
+            disabled={job.phase === 'stopping'}
+            onClick={onStop}
+          >
+            <Square size={14} />
+            {stopLabel}
+          </button>
+        ) : (
+          <button type="button" className="btn btn-primary" onClick={onClose}>
+            完成
+          </button>
+        )}
+      </div>
+    </div>
   )
 }
 
@@ -777,7 +1227,7 @@ function buildBookSections(
       sections.push({
         key: 'shelf:none',
         title: '未归架',
-        hint: '上传入库或尚未关联目录的书',
+        hint: '上传入库或尚未归入书架的书',
         books: unassigned,
       })
     }
@@ -839,6 +1289,8 @@ function LibraryModal({
 
   const [watchOnCreate, setWatchOnCreate] = useState(false)
   const [disablingAuto, setDisablingAuto] = useState(false)
+  const [pendingDelete, setPendingDelete] = useState<Library | null>(null)
+  const [deletingLibrary, setDeletingLibrary] = useState(false)
   const watchingCount = libraries.filter((l) => l.scan_mode === 'watch').length
 
   async function createLibrary() {
@@ -930,18 +1382,23 @@ function LibraryModal({
     }
   }
 
-  async function deleteLibrary(id: string) {
-    if (!confirm('删除书架不会删除已入库的书籍，仅解除目录关联，确定删除？')) return
+  async function confirmDeleteLibrary() {
+    if (!pendingDelete || deletingLibrary) return
+    setDeletingLibrary(true)
     try {
-      await api.delete(`/api/libraries/${id}`)
+      await api.delete(`/api/libraries/${pendingDelete.id}`)
       toast.success('书架已删除')
+      setPendingDelete(null)
       onChanged()
     } catch (err) {
       toast.error(err instanceof ApiError ? err.message : '删除失败')
+    } finally {
+      setDeletingLibrary(false)
     }
   }
 
   return (
+    <>
     <Modal title="书库目录管理" onClose={onClose} width={620}>
       <div style={{ color: 'var(--ink-faint)', fontSize: 12.5, marginBottom: 12 }}>
         把宿主机上的电子书目录挂载进容器后，在此逐级浏览、选中某个文件夹即可创建一个「书架」；
@@ -1010,7 +1467,7 @@ function LibraryModal({
           <button className="btn btn-sm" onClick={() => scanLibrary(lib.id)}>
             扫描
           </button>
-          <button className="icon-btn" style={{ width: 30, height: 30 }} onClick={() => deleteLibrary(lib.id)} title="删除书架">
+          <button className="icon-btn" style={{ width: 30, height: 30 }} onClick={() => setPendingDelete(lib)} title="删除书架">
             <Trash2 size={13} />
           </button>
         </div>
@@ -1057,6 +1514,22 @@ function LibraryModal({
         {busy ? '添加中…' : '添加书架'}
       </button>
     </Modal>
+
+    {pendingDelete && (
+      <ConfirmDialog
+        title="删除书架"
+        lead={
+          <>
+            确认删除书架「<strong>{pendingDelete.name}</strong>」？
+          </>
+        }
+        description="不会删除已入库的书籍，仅解除目录关联。"
+        busy={deletingLibrary}
+        onClose={() => !deletingLibrary && setPendingDelete(null)}
+        onConfirm={confirmDeleteLibrary}
+      />
+    )}
+    </>
   )
 }
 

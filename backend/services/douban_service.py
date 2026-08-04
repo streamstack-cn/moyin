@@ -14,9 +14,13 @@ douban_service.py — 豆瓣图书元数据抓取（登录态 Cookie 模式 + �
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import json
+import logging
+import random
 import re
+import string
 import time
 import uuid
 from typing import Any, Optional
@@ -24,18 +28,141 @@ from typing import Any, Optional
 import httpx
 from bs4 import BeautifulSoup
 
+logger = logging.getLogger(__name__)
+
 UA = (
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-    "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
+    "(KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"
 )
 
 SUGGEST_URL = "https://book.douban.com/j/subject_suggest"
 SEARCH_URL = "https://search.douban.com/book/subject_search"
 SUBJECT_URL = "https://book.douban.com/subject/{id}/"
 MINE_URL = "https://www.douban.com/mine/"
+HOME_URL = "https://www.douban.com/"
+BOOK_HOME_URL = "https://book.douban.com/"
 QRCODE_CODE_URL = "https://accounts.douban.com/j/mobile/login/qrlogin_code"
 QRCODE_STATUS_URL = "https://accounts.douban.com/j/mobile/login/qrlogin_status"
 QRCODE_SESSION_TTL_SECONDS = 5 * 60
+
+# 请求节流：批量匹配时降低触发 sec.douban.com 的概率
+# 手动「匹配在线元数据」走 fast 路径，尽量只打 1 次请求
+_MIN_REQUEST_INTERVAL = 0.35
+_last_request_at = 0.0
+_warmup_cookie_key = ""
+_warmup_at = 0.0
+_WARMUP_TTL = 10 * 60
+
+
+class DoubanRiskControlError(Exception):
+    """豆瓣风控 / PoW / 登录跳转。"""
+
+    def __init__(self, message: str = "", *, final_url: str = ""):
+        super().__init__(message or "豆瓣触发风控")
+        self.final_url = final_url
+
+
+def _gen_bid() -> str:
+    alphabet = string.ascii_letters + string.digits
+    return "".join(random.choice(alphabet) for _ in range(11))
+
+
+def sanitize_cookie_input(cookie: str = "") -> str:
+    """清理用户粘贴的 Cookie：去掉 Cookie: 前缀、换行与多余空白。"""
+    s = (cookie or "").strip()
+    s = re.sub(r"(?i)^cookie\s*:\s*", "", s)
+    s = s.replace("\r", "\n")
+    # 有人会竖着粘贴多行 name=value
+    if "\n" in s and ";" not in s:
+        parts = [ln.strip().strip(",") for ln in s.split("\n") if ln.strip()]
+        s = "; ".join(parts)
+    else:
+        s = re.sub(r"[\n\t]+", " ", s)
+    s = re.sub(r"\s*;\s*", "; ", s)
+    s = re.sub(r"\s{2,}", " ", s).strip().strip(";")
+    return s
+
+
+def _normalize_cookie(cookie: str = "") -> str:
+    """保证带有 bid；补齐常见浏览器痕迹字段（不覆盖用户已有值）。"""
+    raw = sanitize_cookie_input(cookie)
+    parts: dict[str, str] = {}
+    if raw:
+        for seg in raw.split(";"):
+            seg = seg.strip()
+            if not seg or "=" not in seg:
+                continue
+            k, v = seg.split("=", 1)
+            key = k.strip()
+            # 防止把「Cookie: bid」之类脏键写进去
+            if not key or key.lower() == "cookie" or any(ch in key for ch in (" ", "\n", "\t")):
+                continue
+            parts[key] = v.strip()
+    if "bid" not in parts:
+        parts["bid"] = _gen_bid()
+    # ll 为地区偏好，缺省时补一个常见值，降低异常画像
+    if "ll" not in parts:
+        parts["ll"] = '"108288"'
+    # 保持用户原有顺序：先原 cookie，再补缺省
+    ordered: list[str] = []
+    seen: set[str] = set()
+    if raw:
+        for seg in raw.split(";"):
+            seg = seg.strip()
+            if not seg or "=" not in seg:
+                continue
+            k = seg.split("=", 1)[0].strip()
+            if k not in parts or k in seen:
+                continue
+            seen.add(k)
+            ordered.append(f"{k}={parts[k]}")
+    for k, v in parts.items():
+        if k in seen:
+            continue
+        ordered.append(f"{k}={v}")
+    return "; ".join(ordered)
+
+
+def prepare_cookie(cookie: str = "") -> str:
+    """对外：清洗并规范化用户粘贴的 Cookie。"""
+    return _normalize_cookie(sanitize_cookie_input(cookie))
+
+
+def _cookie_has_login_token(cookie: str) -> bool:
+    return bool(re.search(r"(?:^|;\s*)dbcl2=", cookie or "", re.I))
+
+
+def cookie_has_login_token(cookie: str = "") -> bool:
+    """对外：判断 Cookie 是否含登录凭证 dbcl2。"""
+    return _cookie_has_login_token(prepare_cookie(cookie) or sanitize_cookie_input(cookie))
+
+
+def _probe_headers(cookie: str) -> dict:
+    """探活用更保守的请求头，避免过度「浏览器伪装」反而触发拦截。"""
+    return {
+        "User-Agent": UA,
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
+        "Cookie": _normalize_cookie(cookie),
+        "Referer": "https://www.douban.com/",
+    }
+
+
+def _is_risk_control(resp: httpx.Response) -> bool:
+    final = str(resp.url)
+    if "sec.douban.com" in final or "/sec/captcha" in final or "/misc/sorry" in final:
+        return True
+    if resp.status_code in (401, 403):
+        return True
+    text = resp.text or ""
+    if len(text) < 5000 and re.search(r"captchaToken|verifyToken|window\.captcha", text):
+        return True
+    title_m = re.search(r"<title>([^<]+)</title>", text[:2000], re.I)
+    if title_m:
+        t = title_m.group(1)
+        if any(x in t for x in ("登录跳转", "验证", "禁止访问", "sec")):
+            return True
+    return False
 
 # 出版社名若以这些城市开头，可推断出版地（豆瓣本身不提供出版地字段）
 _CITY_PREFIXES = (
@@ -88,15 +215,100 @@ _PUBLISHER_PLACE = {
 }
 
 
-def _headers(cookie: str = "", referer: str = "https://book.douban.com/") -> dict:
+def _headers(
+    cookie: str = "",
+    referer: str = "https://book.douban.com/",
+    *,
+    xhr: bool = False,
+) -> dict:
+    """尽量贴近真实 Chrome 导航/XHR，降低被 sec.douban 拦截的概率。"""
+    cookie = _normalize_cookie(cookie)
+    if xhr:
+        accept = "application/json, text/plain, */*"
+        dest, mode, site = "empty", "cors", "same-site"
+    else:
+        accept = (
+            "text/html,application/xhtml+xml,application/xml;q=0.9,"
+            "image/avif,image/webp,image/apng,*/*;q=0.8"
+        )
+        dest, mode, site = "document", "navigate", "same-site" if referer else "none"
     headers = {
         "User-Agent": UA,
-        "Referer": referer,
-        "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
+        "Accept": accept,
+        "Accept-Language": "zh-CN,zh;q=0.9,en-US;q=0.8,en;q=0.7",
+        "Cache-Control": "max-age=0",
+        "Cookie": cookie,
+        "Sec-Ch-Ua": '"Chromium";v="126", "Not.A/Brand";v="8", "Google Chrome";v="126"',
+        "Sec-Ch-Ua-Mobile": "?0",
+        "Sec-Ch-Ua-Platform": '"macOS"',
+        "Sec-Fetch-Dest": dest,
+        "Sec-Fetch-Mode": mode,
+        "Sec-Fetch-Site": site,
+        "Upgrade-Insecure-Requests": "1",
     }
-    if cookie:
-        headers["Cookie"] = cookie
+    if referer:
+        headers["Referer"] = referer
+    if xhr:
+        headers["X-Requested-With"] = "XMLHttpRequest"
+        headers.pop("Upgrade-Insecure-Requests", None)
     return headers
+
+
+async def _throttle() -> None:
+    global _last_request_at
+    now = time.monotonic()
+    wait = _MIN_REQUEST_INTERVAL - (now - _last_request_at)
+    if wait > 0:
+        await asyncio.sleep(wait + random.uniform(0.02, 0.12))
+    _last_request_at = time.monotonic()
+
+
+async def _maybe_warmup(client: httpx.AsyncClient, cookie: str) -> None:
+    """同 Cookie 一段时间内先访问首页，建立会话痕迹。"""
+    global _warmup_cookie_key, _warmup_at
+    key = cookie[:120]
+    now = time.monotonic()
+    if _warmup_cookie_key == key and now - _warmup_at < _WARMUP_TTL:
+        return
+    try:
+        await client.get(HOME_URL, headers=_headers(cookie, referer="", xhr=False))
+        await asyncio.sleep(random.uniform(0.25, 0.55))
+        await client.get(
+            BOOK_HOME_URL,
+            headers=_headers(cookie, referer="https://www.douban.com/"),
+        )
+    except Exception:  # noqa: BLE001
+        pass
+    _warmup_cookie_key = key
+    _warmup_at = time.monotonic()
+
+
+async def _douban_get(
+    url: str,
+    *,
+    cookie: str = "",
+    params: Optional[dict] = None,
+    referer: str = "https://book.douban.com/",
+    xhr: bool = False,
+    timeout: float = 15,
+    warmup: bool = True,
+) -> httpx.Response:
+    await _throttle()
+    cookie = _normalize_cookie(cookie)
+    headers = _headers(cookie, referer=referer, xhr=xhr)
+    async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as client:
+        if warmup:
+            await _maybe_warmup(client, cookie)
+            await _throttle()
+        resp = await client.get(url, params=params, headers=headers)
+    if _is_risk_control(resp):
+        logger.warning("Douban risk control at %s -> %s", url, resp.url)
+        raise DoubanRiskControlError(
+            "豆瓣触发风控（sec.douban.com）。请到管理后台重新扫码/粘贴 Cookie 后重试，并降低批量匹配频率。",
+            final_url=str(resp.url),
+        )
+    resp.raise_for_status()
+    return resp
 
 
 def infer_pub_place(publisher: str) -> str:
@@ -146,21 +358,78 @@ def parse_douban_display_name(html: str, user_id: str = "") -> str:
 
 
 async def check_cookie(cookie: str) -> dict[str, Any]:
-    """探活 Cookie：访问 /mine/，登录态会 302 到 /people/<id>/"""
-    if not cookie:
-        return {"valid": False, "user_id": "", "name": ""}
-    try:
-        async with httpx.AsyncClient(follow_redirects=True, timeout=10) as client:
-            resp = await client.get(MINE_URL, headers=_headers(cookie))
-    except Exception:
-        return {"valid": False, "user_id": "", "name": ""}
+    """探活 Cookie：访问 /mine/，登录态会 302 到 /people/<id>/。
 
-    match = re.search(r"/people/([^/]+)/", str(resp.url))
-    if not match:
-        return {"valid": False, "user_id": "", "name": ""}
-    user_id = match.group(1)
-    name = parse_douban_display_name(resp.text, user_id)
-    return {"valid": True, "user_id": user_id, "name": name}
+    与搜索请求分离：不走预热/强风控抛错，避免把「IP 被风控」误报成「Cookie 无效」。
+    """
+    raw = sanitize_cookie_input(cookie)
+    if not raw:
+        return {
+            "valid": False,
+            "user_id": "",
+            "name": "",
+            "error": "请粘贴豆瓣 Cookie",
+        }
+    normalized = _normalize_cookie(raw)
+    if not _cookie_has_login_token(normalized):
+        return {
+            "valid": False,
+            "user_id": "",
+            "name": "",
+            "error": "Cookie 中缺少 dbcl2（登录凭证）。请在已登录豆瓣的浏览器中打开任意页面，从请求头复制完整 Cookie，需包含 dbcl2 与 ck。",
+        }
+
+    try:
+        async with httpx.AsyncClient(follow_redirects=True, timeout=15) as client:
+            resp = await client.get(MINE_URL, headers=_probe_headers(normalized))
+    except Exception as exc:  # noqa: BLE001
+        return {
+            "valid": False,
+            "user_id": "",
+            "name": "",
+            "error": f"无法连接豆瓣：{exc.__class__.__name__}",
+        }
+
+    final = str(resp.url)
+    # 风控：Cookie 本身可能仍有效
+    if "sec.douban.com" in final or "/misc/sorry" in final or "/sec/captcha" in final:
+        return {
+            "valid": False,
+            "user_id": "",
+            "name": "",
+            "risk_control": True,
+            "error": "豆瓣对当前服务器 IP 触发了访问风控（Cookie 可能仍有效）。已可先保存，系统会定时复检。",
+        }
+
+    match = re.search(r"/people/([^/]+)/", final)
+    if match:
+        user_id = match.group(1)
+        name = parse_douban_display_name(resp.text, user_id)
+        return {"valid": True, "user_id": user_id, "name": name}
+
+    if "accounts.douban.com" in final or "passport/login" in final or "login" in final.lower():
+        return {
+            "valid": False,
+            "user_id": "",
+            "name": "",
+            "error": "Cookie 无效或已过期。请重新登录豆瓣后，再复制包含 dbcl2、ck、bid 的完整 Cookie。",
+        }
+
+    # 少数情况：仍停在 /mine/ 但未跳到 people
+    if resp.status_code == 200 and ("logout" in resp.text.lower() or "我的豆瓣" in resp.text):
+        # 尝试从页面再解析 people 链接
+        m2 = re.search(r"/people/([^/]+)/", resp.text or "")
+        if m2:
+            user_id = m2.group(1)
+            name = parse_douban_display_name(resp.text, user_id)
+            return {"valid": True, "user_id": user_id, "name": name}
+
+    return {
+        "valid": False,
+        "user_id": "",
+        "name": "",
+        "error": f"未能确认登录态（最终地址：{final[:80]}）。请确认复制的是登录后的完整 Cookie。",
+    }
 
 
 def _extract_window_data(html: str) -> dict[str, Any]:
@@ -216,32 +485,95 @@ def _parse_search_abstract(abstract: str) -> dict[str, Any]:
     }
 
 
-async def search_books(query: str, cookie: str = "") -> list[dict[str, Any]]:
+def _merge_book_hits(*groups: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """按 douban_id 去重合并；先出现的优先（搜索页版本信息更全）。"""
+    merged: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for group in groups:
+        for hit in group or []:
+            sid = str(hit.get("douban_id") or "").strip()
+            if not sid or sid in seen:
+                continue
+            seen.add(sid)
+            merged.append(hit)
+    return merged
+
+
+async def search_books(
+    query: str,
+    cookie: str = "",
+    *,
+    fast: bool = False,
+) -> list[dict[str, Any]]:
     """
-    图书搜索：优先走 search.douban.com 搜索页（与 Obsidian 豆瓣插件同源），
-    可返回同书名不同年份/出版社的多个版本；失败时回退联想接口。
+    图书搜索。
+    - fast=True（手动匹配）：搜索页（无预热）+ 联想合并，尽量多备选且不拖太久
+    - fast=False（自动匹配等）：搜索页优先（含预热），不足再补联想
     """
     q = (query or "").strip()
     if not q:
         return []
 
-    results = await _search_books_via_subject_search(q, cookie)
-    if results:
-        return results
-    return await _search_books_via_suggest(q, cookie)
+    risk_err: Optional[DoubanRiskControlError] = None
+    subject_hits: list[dict[str, Any]] = []
+    suggest_hits: list[dict[str, Any]] = []
 
+    if fast:
+        # 手动匹配：跳过预热；两路都打，合并去重拿更多版本/相关书
+        try:
+            subject_hits = await _search_books_via_subject_search(q, cookie, warmup=False)
+        except DoubanRiskControlError as exc:
+            risk_err = exc
+        try:
+            suggest_hits = await _search_books_via_suggest(q, cookie)
+        except DoubanRiskControlError as exc:
+            risk_err = risk_err or exc
+        merged = _merge_book_hits(subject_hits, suggest_hits)
+        if merged:
+            return merged
+        if risk_err:
+            raise risk_err
+        return []
 
-async def _search_books_via_subject_search(query: str, cookie: str = "") -> list[dict[str, Any]]:
     try:
-        async with httpx.AsyncClient(timeout=15, follow_redirects=True) as client:
-            resp = await client.get(
-                SEARCH_URL,
-                params={"search_text": query, "cat": "1001"},
-                headers=_headers(cookie, referer="https://book.douban.com/"),
-            )
-            resp.raise_for_status()
-            data = _extract_window_data(resp.text)
-    except Exception:
+        subject_hits = await _search_books_via_subject_search(q, cookie, warmup=True)
+    except DoubanRiskControlError as exc:
+        risk_err = exc
+
+    if len(subject_hits) < 8:
+        try:
+            suggest_hits = await _search_books_via_suggest(q, cookie)
+        except DoubanRiskControlError as exc:
+            risk_err = risk_err or exc
+
+    merged = _merge_book_hits(subject_hits, suggest_hits)
+    if merged:
+        return merged
+    if risk_err:
+        raise risk_err
+    return []
+
+
+async def _search_books_via_subject_search(
+    query: str, cookie: str = "", *, warmup: bool = True
+) -> list[dict[str, Any]]:
+    resp = await _douban_get(
+        SEARCH_URL,
+        cookie=cookie,
+        params={"search_text": query, "cat": "1001"},
+        referer="https://book.douban.com/",
+        timeout=15,
+        warmup=warmup,
+    )
+    data = _extract_window_data(resp.text)
+    if not data:
+        # 无 __DATA__ 时也可能是软风控 / 页面改版
+        if _is_risk_control(resp) or "subject_search" not in resp.text[:3000]:
+            if "sec.douban" in str(resp.url) or len(resp.text) < 2000:
+                raise DoubanRiskControlError(
+                    "豆瓣搜索页无有效数据，可能已触发风控。请更新 Cookie 后重试。",
+                    final_url=str(resp.url),
+                )
         return []
 
     results: list[dict[str, Any]] = []
@@ -283,13 +615,17 @@ async def _search_books_via_subject_search(query: str, cookie: str = "") -> list
 
 async def _search_books_via_suggest(query: str, cookie: str = "") -> list[dict[str, Any]]:
     """联想接口兜底：速度快但版本少、字段少。"""
+    resp = await _douban_get(
+        SUGGEST_URL,
+        cookie=cookie,
+        params={"q": query},
+        referer="https://book.douban.com/",
+        xhr=True,
+        timeout=12,
+        warmup=False,
+    )
     try:
-        async with httpx.AsyncClient(timeout=10) as client:
-            resp = await client.get(
-                SUGGEST_URL, params={"q": query}, headers=_headers(cookie)
-            )
-            resp.raise_for_status()
-            data = resp.json()
+        data = resp.json()
     except Exception:
         return []
 
@@ -456,9 +792,15 @@ def _extract_catalog(soup: BeautifulSoup, douban_id: str) -> str:
 async def get_book_detail(douban_id: str, cookie: str = "") -> Optional[dict[str, Any]]:
     url = SUBJECT_URL.format(id=douban_id)
     try:
-        async with httpx.AsyncClient(follow_redirects=True, timeout=15) as client:
-            resp = await client.get(url, headers=_headers(cookie, referer="https://book.douban.com/"))
-            resp.raise_for_status()
+        resp = await _douban_get(
+            url,
+            cookie=cookie,
+            referer="https://book.douban.com/",
+            timeout=15,
+            warmup=True,
+        )
+    except DoubanRiskControlError:
+        raise
     except Exception:
         return None
 
@@ -525,15 +867,72 @@ async def get_book_detail(douban_id: str, cookie: str = "") -> Optional[dict[str
     }
 
 
-async def search_and_fetch_best(query: str, cookie: str = "") -> Optional[dict[str, Any]]:
-    """搜索并直接抓取第一条匹配结果的详情，供自动匹配元数据使用"""
-    candidates = await search_books(query, cookie)
-    if not candidates:
+async def search_and_fetch_best(
+    query: str,
+    cookie: str = "",
+    *,
+    year: str = "",
+    publisher: str = "",
+) -> Optional[dict[str, Any]]:
+    """清洗书名后搜索，按标题/年份/出版社打分取最佳，再抓详情。"""
+    from services.book_match import parse_book_title, pick_best_candidate, rank_candidates
+
+    parsed = parse_book_title(query, year_hint=year, publisher_hint=publisher)
+    match_title = parsed.title or query
+    match_year = year or parsed.year
+    match_publisher = publisher
+    match_authors = list(parsed.authors or [])
+
+    merged: list[dict[str, Any]] = []
+    seen_ids: set[str] = set()
+    risk_err: Optional[DoubanRiskControlError] = None
+    for q in parsed.queries[:3]:
+        try:
+            hits = await search_books(q, cookie)
+        except DoubanRiskControlError as exc:
+            risk_err = exc
+            break
+        for hit in hits:
+            sid = str(hit.get("douban_id") or "")
+            if not sid or sid in seen_ids:
+                continue
+            seen_ids.add(sid)
+            merged.append(hit)
+        # 已有高置信候选时可早停，减少请求、降低风控
+        if merged:
+            ranked = rank_candidates(
+                merged,
+                title=match_title,
+                year=match_year,
+                publisher=match_publisher,
+                authors=match_authors,
+            )
+            if ranked and float(ranked[0].get("_match_score") or 0) >= 85:
+                merged = ranked
+                break
+
+    if not merged:
+        if risk_err:
+            raise risk_err
         return None
-    detail = await get_book_detail(candidates[0]["douban_id"], cookie)
+
+    best = pick_best_candidate(
+        merged,
+        title=match_title,
+        year=match_year,
+        publisher=match_publisher,
+        authors=match_authors,
+        min_score=58.0,
+    )
+    if not best:
+        return None
+
+    detail = await get_book_detail(str(best["douban_id"]), cookie)
     if detail and not detail.get("cover_url"):
-        # 详情页封面失败时，回退联想接口里的缩略图
-        detail["cover_url"] = candidates[0].get("cover_url", "")
+        detail["cover_url"] = best.get("cover_url", "")
+    if detail:
+        detail["_match_score"] = best.get("_match_score")
+        detail["_match_query"] = match_title
     return detail
 
 

@@ -8,6 +8,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import threading
+import time
 from pathlib import Path
 from typing import Optional
 
@@ -17,6 +18,9 @@ _observer = None
 _handlers: dict[str, "DebouncedScanHandler"] = {}
 _loop: Optional[asyncio.AbstractEventLoop] = None
 _lock = threading.Lock()
+# 上传/转移写入书架目录时短暂抑制监控扫描，避免与手动入库竞态产生重复书目
+_suppressed_until: dict[str, float] = {}
+_suppress_lock = threading.Lock()
 
 try:
     from watchdog.events import FileSystemEventHandler
@@ -63,6 +67,9 @@ class DebouncedScanHandler(FileSystemEventHandler):  # type: ignore[misc,valid-t
             self._timer.start()
 
     def _fire(self) -> None:
+        if is_library_suppressed(self.library_id):
+            logger.info("跳过监控扫描（入库抑制中）: library=%s", self.library_id)
+            return
         logger.info("目录变动触发扫描: library=%s", self.library_id)
         from services.library_jobs import enqueue_library_scan
 
@@ -134,6 +141,41 @@ def start_watchers(debounce_sec: float = 8.0) -> None:
 
 def refresh_watchers(debounce_sec: float = 8.0) -> None:
     start_watchers(debounce_sec=debounce_sec)
+
+
+def suppress_library_scans(library_id: str, seconds: float = 90.0) -> None:
+    """在指定秒数内忽略该书架的监控触发扫描。"""
+    if not library_id:
+        return
+    until = time.monotonic() + max(5.0, float(seconds))
+    with _suppress_lock:
+        _suppressed_until[library_id] = until
+    # 清掉已排队的防抖，避免抑制前已预约的扫描仍触发
+    with _lock:
+        handler = _handlers.get(library_id)
+        if handler:
+            with handler._timer_lock:
+                if handler._timer:
+                    handler._timer.cancel()
+                    handler._timer = None
+    try:
+        from services.library_jobs import clear_pending_library
+
+        clear_pending_library(library_id)
+    except Exception:  # noqa: BLE001
+        pass
+    logger.info("已抑制书架监控扫描 library=%s for %.0fs", library_id, seconds)
+
+
+def is_library_suppressed(library_id: str) -> bool:
+    with _suppress_lock:
+        until = _suppressed_until.get(library_id)
+        if until is None:
+            return False
+        if time.monotonic() >= until:
+            _suppressed_until.pop(library_id, None)
+            return False
+        return True
 
 
 def cancel_pending_debounces() -> None:

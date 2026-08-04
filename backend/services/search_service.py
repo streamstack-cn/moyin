@@ -66,6 +66,7 @@ def search_across_library(db: Session, keyword: str, limit: int = 50) -> list[di
             {
                 "book_id": book.id,
                 "book_title": book.title,
+                "cover_url": cover_url_for(book),
                 "chapter_title": chunk.chapter_title,
                 "cfi_anchor": chunk.cfi_anchor,
                 "snippet": _snippet(chunk.text, keyword),
@@ -126,6 +127,7 @@ def search_global(db: Session, user_id: str, keyword: str, limit: int = 8) -> di
             "id": h.id,
             "book_id": h.book_id,
             "book_title": book.title,
+            "cover_url": cover_url_for(book),
             "cfi_range": h.cfi_range,
             "quoted_text": _snippet(h.quoted_text, keyword) if keyword.lower() in h.quoted_text.lower() else h.quoted_text[:120],
             "note": h.note,
@@ -151,6 +153,7 @@ def search_global(db: Session, user_id: str, keyword: str, limit: int = 8) -> di
             "project_name": project.name,
             "book_id": item.book_id,
             "book_title": book.title,
+            "cover_url": cover_url_for(book),
             "quoted_text": _snippet(item.quoted_text, keyword) if keyword.lower() in item.quoted_text.lower() else item.quoted_text[:120],
             "group_name": item.group_name,
             "page_no": item.page_no,

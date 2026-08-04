@@ -13,6 +13,7 @@ import {
 } from 'lucide-react'
 import { api, ApiError } from '../api/client'
 import type { CitationItem, CitationProject } from '../api/types'
+import ConfirmDialog from '../components/ConfirmDialog'
 import Modal from '../components/Modal'
 
 interface PreviewFootnote {
@@ -38,6 +39,8 @@ export default function CitationBasketPage() {
   const [footnotes, setFootnotes] = useState<PreviewFootnote[]>([])
   const [bibliography, setBibliography] = useState<PreviewBibliography[]>([])
   const [showNewProject, setShowNewProject] = useState(false)
+  const [pendingDelete, setPendingDelete] = useState<CitationProject | null>(null)
+  const [deletingProject, setDeletingProject] = useState(false)
   const [loading, setLoading] = useState(true)
 
   async function copyText(label: string, text: string) {
@@ -70,19 +73,28 @@ export default function CitationBasketPage() {
     return p
   }
 
-  async function deleteProject(id: string) {
+  function askDeleteProject(id: string) {
     const target = projects.find((p) => p.id === id)
-    if (!target) return
-    if (!confirm(`删除引用篮「${target.name}」？其中全部引用将一并删除，且不可恢复。`)) return
+    if (!target || deletingProject) return
+    setPendingDelete(target)
+  }
+
+  async function confirmDeleteProject() {
+    if (!pendingDelete || deletingProject) return
+    const id = pendingDelete.id
+    setDeletingProject(true)
     try {
       await api.delete(`/api/citation/projects/${id}`)
       toast.success('引用篮已删除')
+      setPendingDelete(null)
       const rows = await loadProjects()
       if (activeProjectId === id) {
         setActiveProjectId(pickDefaultProjectId(rows))
       }
     } catch (err) {
       toast.error(err instanceof ApiError ? err.message : '删除失败')
+    } finally {
+      setDeletingProject(false)
     }
   }
 
@@ -234,7 +246,7 @@ export default function CitationBasketPage() {
         </div>
         <div className="citation-topbar-actions">
           {activeProject && (
-            <button className="btn" onClick={() => deleteProject(activeProject.id)} title="删除当前引用篮">
+            <button className="btn" onClick={() => askDeleteProject(activeProject.id)} title="删除当前引用篮">
               <Trash2 size={16} />
               <span className="btn-label-full">删除当前</span>
               <span className="btn-label-short">删除</span>
@@ -530,6 +542,21 @@ export default function CitationBasketPage() {
             await loadProjects()
             setActiveProjectId(id)
           }}
+        />
+      )}
+
+      {pendingDelete && (
+        <ConfirmDialog
+          title="删除引用篮"
+          lead={
+            <>
+              确认删除引用篮「<strong>{pendingDelete.name}</strong>」？
+            </>
+          }
+          description="其中全部引用将一并删除，且不可恢复。"
+          busy={deletingProject}
+          onClose={() => !deletingProject && setPendingDelete(null)}
+          onConfirm={confirmDeleteProject}
         />
       )}
     </>

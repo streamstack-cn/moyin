@@ -160,6 +160,21 @@ def system_status(admin: User = Depends(require_admin)):
     }
 
 
+@router.get("/changelog")
+def admin_changelog(admin: User = Depends(require_admin)):
+    """返回最近最多 10 条版本更新说明（新版本在前）。"""
+    from changelog import list_changelog
+    from version import APP_VERSION_LABEL, __version__
+
+    entries = list_changelog(10)
+    return {
+        "current_version": __version__,
+        "current_version_label": APP_VERSION_LABEL,
+        "entries": entries,
+        "max_entries": 10,
+    }
+
+
 @router.post("/repair-media")
 def repair_media(db: Session = Depends(get_db), admin: User = Depends(require_admin)):
     """补全缺失封面，并对可转换格式补做 Calibre -> EPUB；补建缺失的全文索引。"""
@@ -317,6 +332,19 @@ def put_google_books_settings(
     _set_config(db, GOOGLE_BOOKS_API_KEY, key)
     db.commit()
     return {"success": True, "api_key_set": bool(key) or bool(os.environ.get("GOOGLE_BOOKS_API_KEY", "").strip())}
+
+
+@settings_router.post("/google-books/test")
+async def test_google_books_settings(
+    db: Session = Depends(get_db),
+    admin: User = Depends(require_admin),
+):
+    """用当前配置的 API Key 做一次轻量连通性检测。"""
+    from services import google_books_service
+
+    row = db.query(AppConfig).filter_by(key=GOOGLE_BOOKS_API_KEY).first()
+    key = (row.value if row else "") or ""
+    return await google_books_service.ping(key)
 
 
 # ── 书库自动 / 定时扫描 ────────────────────────────────────────────────

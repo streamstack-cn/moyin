@@ -83,7 +83,9 @@ ENV PYTHONPATH=/app/backend \
     PYTHONUNBUFFERED=1 \
     RUNNING_IN_DOCKER=1
 
-# 后端代码
+# 后端代码 + 版本号 / 更新日志（Docker Hub 仍只打 latest 标签，版本体现在应用内）
+COPY VERSION /app/VERSION
+COPY CHANGELOG.json /app/CHANGELOG.json
 COPY backend/ /app/backend/
 
 # 前端构建产物

@@ -71,7 +71,7 @@ export default function AdminPage() {
         </div>
       </div>
       <div className="page-content">
-        <div style={{ display: 'flex', gap: 10, marginBottom: 22, flexWrap: 'wrap' }}>
+        <div className="admin-tabs" role="tablist" aria-label="管理后台分区">
           <TabBtn active={tab === 'users'} onClick={() => setTab('users')} icon={<Users size={15} />} label="用户管理" />
           <TabBtn active={tab === 'douban'} onClick={() => setTab('douban')} icon={<Wand2 size={15} />} label="元数据获取" />
           <TabBtn active={tab === 'system'} onClick={() => setTab('system')} icon={<Database size={15} />} label="系统状态" />
@@ -87,9 +87,10 @@ export default function AdminPage() {
   )
 }
 
+
 function TabBtn({ active, onClick, icon, label }: { active: boolean; onClick: () => void; icon: React.ReactNode; label: string }) {
   return (
-    <button className={`btn ${active ? 'btn-primary' : ''}`} onClick={onClick}>
+    <button type="button" role="tab" aria-selected={active} className={`admin-tab ${active ? 'active' : ''}`} onClick={onClick}>
       {icon}
       {label}
     </button>

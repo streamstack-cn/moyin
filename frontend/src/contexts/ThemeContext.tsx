@@ -24,6 +24,8 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     document.documentElement.setAttribute('data-theme', theme)
     localStorage.setItem('moyin_theme', theme)
+    const meta = document.querySelector('meta[name="theme-color"]')
+    if (meta) meta.setAttribute('content', theme === 'light' ? '#eef2f5' : '#0b1014')
   }, [theme])
 
   // 登录后以账号级偏好为准（跨设备同步），仅在切换到新账号时应用一次

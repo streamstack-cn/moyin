@@ -1,6 +1,6 @@
 """api_libraries.py — 书库（本地目录）管理与扫描"""
 
-from typing import Optional
+from typing import Optional, List
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
@@ -35,7 +35,7 @@ def browse_mount(path: str = "", user: User = Depends(require_admin)):
 
 @router.get("")
 def list_libraries(db: Session = Depends(get_db), user: User = Depends(get_current_user)):
-    libs = db.query(Library).order_by(Library.created_at.desc()).all()
+    libs = db.query(Library).order_by(Library.order_index.asc(), Library.created_at.desc()).all()
     # 用 COUNT 聚合，避免 len(lib.books) 把整表书籍加载进内存（扫描时会严重拖慢）
     counts = dict(
         db.query(Book.library_id, func.count(Book.id)).group_by(Book.library_id).all()
@@ -46,6 +46,7 @@ def list_libraries(db: Session = Depends(get_db), user: User = Depends(get_curre
             "name": lib.name,
             "root_path": lib.root_path,
             "scan_mode": lib.scan_mode,
+            "order_index": lib.order_index or 0,
             "last_scanned_at": lib.last_scanned_at,
             "book_count": int(counts.get(lib.id, 0)),
         }
@@ -170,3 +171,12 @@ def scan_library(
 def scan_all_libraries(db: Session = Depends(get_db), user: User = Depends(require_admin)):
     library_jobs.enqueue_scan_all(reason="manual-all")
     return {"success": True, "detail": "已排队扫描全部书库"}
+class ReorderPayload(BaseModel):
+    library_ids: List[str]
+
+@router.put("/reorder")
+def reorder_libraries(payload: ReorderPayload, db: Session = Depends(get_db), user: User = Depends(require_admin)):
+    for i, lib_id in enumerate(payload.library_ids):
+        db.query(Library).filter(Library.id == lib_id).update({"order_index": i})
+    db.commit()
+    return {"ok": True}

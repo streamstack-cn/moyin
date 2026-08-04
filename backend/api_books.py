@@ -216,6 +216,9 @@ def list_books(
     if meta == "missing_douban":
         # 尚未匹配豆瓣：无 douban_id
         query = query.filter(or_(Book.douban_id.is_(None), Book.douban_id == ""))
+    if meta == "top_rated":
+        # 高分推荐：只看有豆瓣评分的书
+        query = query.filter(Book.rating.isnot(None), Book.rating > 0)
     fav_ids = _favorite_ids(db, user.id)
     if meta == "favorited":
         if not fav_ids:
@@ -231,6 +234,8 @@ def list_books(
         query = query.order_by(Book.title.asc())
     elif sort == "added_asc":
         query = query.order_by(Book.added_at.asc())
+    elif sort == "rating_desc" or meta == "top_rated":
+        query = query.order_by(Book.rating.desc(), Book.added_at.desc())
     else:
         query = query.order_by(Book.added_at.desc())
 

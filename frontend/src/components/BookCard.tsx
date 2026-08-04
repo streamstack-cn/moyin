@@ -1,10 +1,13 @@
 import { useEffect, useState, type MouseEvent } from 'react'
 import { useNavigate } from 'react-router-dom'
+import { motion, useReducedMotion } from 'framer-motion'
 import { toast } from 'sonner'
 import { BookText, Check, Download, Star } from 'lucide-react'
+import { staggerItem } from '../lib/motion'
 import { api, ApiError, downloadUrl } from '../api/client'
 import type { BookSummary } from '../api/types'
 import { formatChipClass, formatLabel } from '../lib/bookFormat'
+import CoverTilt from './CoverTilt'
 
 interface Props {
   book: BookSummary
@@ -17,6 +20,7 @@ interface Props {
 
 export default function BookCard({ book, onFavoriteChange, selectable, selected, onToggleSelect }: Props) {
   const navigate = useNavigate()
+  const reduceMotion = useReducedMotion()
   const [fav, setFav] = useState(!!book.is_favorite)
   const [busy, setBusy] = useState(false)
 
@@ -69,7 +73,7 @@ export default function BookCard({ book, onFavoriteChange, selectable, selected,
   }
 
   return (
-    <div
+    <motion.div
       className={`book-card${selectable ? ' selectable' : ''}${selected ? ' selected' : ''}`}
       role="button"
       tabIndex={0}
@@ -80,8 +84,9 @@ export default function BookCard({ book, onFavoriteChange, selectable, selected,
           onCardClick()
         }
       }}
+      variants={reduceMotion ? undefined : staggerItem}
     >
-      <div className="book-cover">
+      <CoverTilt className="book-cover glow-border">
         {book.cover_url ? (
           <img src={book.cover_url} alt={book.title} loading="lazy" />
         ) : (
@@ -109,6 +114,14 @@ export default function BookCard({ book, onFavoriteChange, selectable, selected,
         ) : book.reading_percent > 0 && book.reading_percent < 100 ? (
           <div className="book-progress-bar">
             <div className="book-progress-fill" style={{ width: `${book.reading_percent}%` }} />
+          </div>
+        ) : null}
+        {book.rating && book.rating > 0 ? (
+          <div
+            className="book-rating-badge"
+            title={`豆瓣评分 ${book.rating}`}
+          >
+            {book.rating.toFixed(1)}
           </div>
         ) : null}
         <div className={formatChipClass(book.file_format)} title={`格式：${formatLabel(book.file_format)}`}>
@@ -139,9 +152,9 @@ export default function BookCard({ book, onFavoriteChange, selectable, selected,
         >
           <Star size={13} fill={fav ? 'currentColor' : 'none'} />
         </button>
-      </div>
+      </CoverTilt>
       <div className="book-title">{book.title}</div>
-      <div className="book-author">{book.authors.join('、') || '佚名'}</div>
-    </div>
+      <div className="book-author">{(book.authors || []).join('、') || '佚名'}</div>
+    </motion.div>
   )
 }

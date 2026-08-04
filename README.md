@@ -1,8 +1,8 @@
 # 墨引 MoYin
 
-当前版本：**V0.5**（应用内显示的内部版本号；Docker 镜像只使用标签 `latest`）
+当前版本：**V0.6**（应用内显示的内部版本号；Docker 镜像标签为 `latest`，亦可拉取 `v0.6`）
 
-**私有化部署的电子书阅读 · 标注 · 引用管理系统**
+**私有化部署的电子书阅读 · 标注 · 引用 · AI 伴读管理系统**
 
 [![Docker Hub](https://img.shields.io/badge/Docker_Hub-streamstack%2Fmoyin-066da5?logo=docker&logoColor=white)](https://hub.docker.com/r/streamstack/moyin)
 [![Docker Pulls](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fhub.docker.com%2Fv2%2Frepositories%2Fstreamstack%2Fmoyin%2F&query=%24.pull_count&label=docker%20pulls&color=066da5&logo=docker&logoColor=white&cacheSeconds=300)](https://hub.docker.com/r/streamstack/moyin)
@@ -11,7 +11,7 @@
 
 **镜像：** [`streamstack/moyin:latest`](https://hub.docker.com/r/streamstack/moyin) · **源码：** [`streamstack-cn/moyin`](https://github.com/streamstack-cn/moyin)
 
-统一书库、在线阅读 EPUB / PDF、划词高亮与笔记，并把引文整理进「引用篮」，导出带真脚注的 Word 草稿。适合 NAS / 家庭服务器 / 内网小团队。
+统一书库、在线阅读 EPUB / PDF、划词高亮与笔记，把引文整理进「引用篮」并导出带真脚注的 Word 草稿；还可基于你的高亮 / 笔记 / 引用生成 AI 伴读报告。界面采用毛玻璃与高级动效，桌面与移动端一致。适合 NAS / 家庭服务器 / 内网小团队。
 
 ---
 
@@ -20,10 +20,11 @@
 | 功能 | 说明 |
 |------|------|
 | 多格式书库 | EPUB / PDF / TXT 在线读；MOBI / AZW3 / FB2 等自动转 EPUB |
-| 沉浸阅读 | 进度保存、继续阅读、返回原处、书内搜索、移动端友好 |
+| 沉浸阅读 | 进度保存、继续阅读、返回原处、书内搜索；选区气泡 / 主题弹层毛玻璃质感，移动端友好 |
 | 划词工具栏 | 高亮、批注、加入引用篮 / 当场新建引用篮、脚注 |
 | 引用篮 | 多项目整理、简繁处理、Word 真脚注与去重书目导出 |
-| 首页搜索 | 书名 / 高亮 / 引用 / 正文统一检索，结果带封面缩略图 |
+| AI 伴读 | 按高亮 / 笔记 / 引用生成阅读报告与追问；多服务商 API、画像可配、历史报告带封面 |
+| 首页与书库 | 每日一句悬浮预览、全库搜索；高分推荐（豆瓣分排序）、书架拖拽排序 |
 | 元数据 | 豆瓣（扫码登录）与 Google Books 并行匹配封面与书目 |
 | 目录入库 | 挂载宿主机目录扫描入库（类似 Komga）；也可网页上传 |
 | 多用户 | 读书数据按账号隔离；书库全站共享（详见下节） |
@@ -32,9 +33,9 @@
 
 | 范围 | 规则 |
 |------|------|
-| **所有登录用户** | 浏览书库、阅读、高亮 / 笔记 / 收藏、管理自己的引用篮、**上传电子书**（入库后全员可见） |
+| **所有登录用户** | 浏览书库、阅读、高亮 / 笔记 / 收藏、管理自己的引用篮、使用 AI 伴读、**上传电子书**（入库后全员可见） |
 | **仅管理员** | 元数据编辑与在线匹配、换封面、删书、转移书架、扫描书库、管理书库目录、管理后台（用户 / 豆瓣 / 系统配置） |
-| **按用户隔离** | 阅读进度、高亮、笔记、收藏、引用篮及其条目 |
+| **按用户隔离** | 阅读进度、高亮、笔记、收藏、引用篮及其条目、AI 伴读配置与报告 |
 | **全站共享** | 书目、书架、标签、电子书文件与封面 |
 
 读者直访 `/admin` 会被拦回首页；管理接口服务端也会校验管理员身份。  
@@ -191,12 +192,14 @@ services:
 ## 镜像
 
 - Docker Hub：[`streamstack/moyin`](https://hub.docker.com/r/streamstack/moyin)
-- 镜像标签：仅 **`latest`**（`V0.5` 等为应用内版本号，不作为 Hub 标签）
+- 镜像标签：推荐 **`latest`**；版本标签 **`v0.6`** 与应用内 `V0.6` 对应
 - 平台：`linux/amd64`、`linux/arm64`（Intel / Apple Silicon / 常见 NAS 均可）
 - 内含：Nginx + FastAPI + Calibre + LibreOffice Writer
 
 ```bash
 docker pull streamstack/moyin:latest
+# 或固定版本
+docker pull streamstack/moyin:v0.6
 ```
 
 ---

@@ -20,7 +20,7 @@ export function highlightTerms(query: string): string[] {
   const q = normalizeForMatch(query)
   if (!q) return []
   const terms: string[] = [q]
-  const parts = q.split(/[\s\u3000,，.。;；:：!！?？、"'“”‘’（）()\[\]【】]+/).filter((p) => p.length >= 2)
+  const parts = q.split(/[\s\u3000,，.。;；:：!！?？、"'“”‘’（）()[\]【】]+/).filter((p) => p.length >= 2)
   for (const p of parts) {
     if (!terms.some((t) => t === p)) terms.push(p)
   }

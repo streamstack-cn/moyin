@@ -1,5 +1,7 @@
 import type { ReactNode } from 'react'
 import { useNavigate } from 'react-router-dom'
+import { motion } from 'framer-motion'
+import { staggerContainer, staggerItem } from '../lib/motion'
 import { BookText, Feather, FileSearch, Highlighter } from 'lucide-react'
 import type { GlobalSearchResult } from '../api/types'
 import { formatChipClass, formatLabel } from '../lib/bookFormat'
@@ -31,10 +33,10 @@ function HitRow({
   children: ReactNode
 }) {
   return (
-    <button type="button" className="highlight-item card search-page-hit" onClick={onClick}>
+    <motion.button variants={staggerItem} type="button" className="highlight-item card search-page-hit" onClick={onClick}>
       <HitCover coverUrl={coverUrl} title={bookTitle} />
       <div className="search-page-hit-body">{children}</div>
-    </button>
+    </motion.button>
   )
 }
 
@@ -57,16 +59,17 @@ export default function GlobalSearchResults({
   }
 
   return (
-    <div className="home-search-results">
+    <motion.div className="home-search-results" variants={staggerContainer} initial="initial" animate="animate">
       {result.books.length > 0 && (
         <section className="search-page-group">
-          <div className="search-page-group-title">
+          <motion.div className="search-page-group-title" variants={staggerItem}>
             <BookText size={15} /> 书籍
             <span>{result.books.length}</span>
-          </div>
+          </motion.div>
           <div className="search-page-books">
             {result.books.map((b) => (
-              <button
+              <motion.button
+                variants={staggerItem}
                 key={b.id}
                 type="button"
                 className="search-page-book"
@@ -96,7 +99,7 @@ export default function GlobalSearchResults({
                   <div className="search-page-book-title">{b.title}</div>
                   <div className="search-page-book-meta">{b.authors.join('、') || '佚名'}</div>
                 </div>
-              </button>
+              </motion.button>
             ))}
           </div>
         </section>
@@ -104,10 +107,10 @@ export default function GlobalSearchResults({
 
       {result.highlights.length > 0 && (
         <section className="search-page-group">
-          <div className="search-page-group-title">
+          <motion.div className="search-page-group-title" variants={staggerItem}>
             <Highlighter size={15} /> 高亮笔记
             <span>{result.highlights.length}</span>
-          </div>
+          </motion.div>
           {result.highlights.map((h) => (
             <HitRow
               key={h.id}
@@ -134,10 +137,10 @@ export default function GlobalSearchResults({
 
       {result.citations.length > 0 && (
         <section className="search-page-group">
-          <div className="search-page-group-title">
+          <motion.div className="search-page-group-title" variants={staggerItem}>
             <Feather size={15} /> 引用篮
             <span>{result.citations.length}</span>
-          </div>
+          </motion.div>
           {result.citations.map((c) => (
             <HitRow
               key={c.id}
@@ -159,10 +162,10 @@ export default function GlobalSearchResults({
 
       {result.fulltext.length > 0 && (
         <section className="search-page-group">
-          <div className="search-page-group-title">
+          <motion.div className="search-page-group-title" variants={staggerItem}>
             <FileSearch size={15} /> 正文
             <span>{result.fulltext.length}</span>
-          </div>
+          </motion.div>
           {result.fulltext.map((f, i) => (
             <HitRow
               key={`${f.book_id}-${f.cfi_anchor}-${i}`}
@@ -181,6 +184,6 @@ export default function GlobalSearchResults({
           ))}
         </section>
       )}
-    </div>
+    </motion.div>
   )
 }

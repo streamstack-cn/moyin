@@ -1,17 +1,64 @@
 import { useEffect, useLayoutEffect, useRef, useState, type RefObject } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { toast } from 'sonner'
-import { ArrowRight, BookOpen, Layers, Search, Trash2, X } from 'lucide-react'
+import { ArrowRight, BookOpen, Layers, Quote, Search, Trash2, X } from 'lucide-react'
 import { api, ApiError } from '../api/client'
-import type { BookSummary, GlobalSearchResult, HomeFeed, HomeSnippet } from '../api/types'
+import type { BookSummary, DailyQuote, GlobalSearchResult, HomeFeed, HomeSnippet } from '../api/types'
 import BookCard from '../components/BookCard'
 import GlobalSearchResults from '../components/GlobalSearchResults'
 import Modal from '../components/Modal'
 import { useAuth } from '../contexts/AuthContext'
 import { formatChipClass, formatLabel } from '../lib/bookFormat'
 import { readerDeepLink } from '../lib/readerDeepLink'
+import { trackGlow } from '../lib/glowTrack'
 
 const EMPTY_SEARCH: GlobalSearchResult = { books: [], highlights: [], citations: [], fulltext: [] }
+
+/** 点击「每日一句」跳转回书中原文位置：优先用现成定位，否则退化为全文检索锚点 */
+async function openDailyQuote(quote: DailyQuote, navigate: (to: string) => void) {
+  const full = quote.quoted_text.trim()
+  const q = full.slice(0, 80)
+  const cfi = (quote.cfi_range || '').trim()
+  const isPdf = (quote.book_format || '').toLowerCase() === 'pdf'
+  const usableCfi =
+    Boolean(cfi) &&
+    (cfi.startsWith('epubcfi(') ||
+      cfi.startsWith('pdf:') ||
+      /\.(x?html?|xml)([#?]|$)/i.test(cfi) ||
+      (!isPdf && !/^\d+$/.test(cfi)))
+
+  if (usableCfi) {
+    navigate(readerDeepLink(quote.book_id, { cfi, q: q || null }))
+    return
+  }
+
+  if (full) {
+    const queries = [full.slice(0, 48), full.slice(0, 24), full.slice(0, 12)]
+      .map((s) => s.trim())
+      .filter((s, i, arr) => s.length >= 6 && arr.indexOf(s) === i)
+    for (const query of queries) {
+      try {
+        const { results } = await api.get<{ results: { cfi_anchor: string }[] }>(
+          `/api/search/book/${quote.book_id}?q=${encodeURIComponent(query)}`,
+        )
+        const hit = (results?.[0]?.cfi_anchor || '').trim()
+        if (hit) {
+          navigate(readerDeepLink(quote.book_id, { cfi: hit, q: query }))
+          return
+        }
+      } catch {
+        /* try shorter query */
+      }
+    }
+  }
+
+  if (isPdf && quote.page_no && /^\d+$/.test(quote.page_no)) {
+    navigate(readerDeepLink(quote.book_id, { cfi: `pdf:#page=${quote.page_no}`, q: q || null }))
+    return
+  }
+
+  navigate(readerDeepLink(quote.book_id, { q: q || null }))
+}
 
 function greeting(): string {
   const h = new Date().getHours()
@@ -52,6 +99,7 @@ export default function HomePage() {
   const [searchParams, setSearchParams] = useSearchParams()
   const [feed, setFeed] = useState<HomeFeed | null>(null)
   const [loading, setLoading] = useState(true)
+  const [dailyQuote, setDailyQuote] = useState<DailyQuote | null>(null)
 
   const [query, setQuery] = useState(() => searchParams.get('q') || '')
   const [activeQuery, setActiveQuery] = useState('')
@@ -67,6 +115,10 @@ export default function HomePage() {
       .get<HomeFeed>('/api/books/home')
       .then(setFeed)
       .finally(() => setLoading(false))
+    api
+      .get<DailyQuote | null>('/api/highlights/daily-quote')
+      .then(setDailyQuote)
+      .catch(() => setDailyQuote(null))
   }, [])
 
   async function runSearch(keyword: string) {
@@ -133,8 +185,24 @@ export default function HomePage() {
 
   if (loading) {
     return (
-      <div className="empty-state" style={{ minHeight: '70vh' }}>
-        <div className="spinner" />
+      <div className="page-content home-page skeleton-page" aria-busy="true" aria-label="加载中">
+        <div className="skeleton-row">
+          <div className="skeleton-loader skeleton-line" style={{ width: 200, height: 22 }} />
+        </div>
+        <div className="skeleton-row">
+          {[0, 1, 2].map((i) => (
+            <div key={i} className="skeleton-loader skeleton-block" style={{ flex: '1 1 260px', height: 118 }} />
+          ))}
+        </div>
+        <div className="skeleton-row">
+          {Array.from({ length: 6 }).map((_, i) => (
+            <div key={i} className="skeleton-book-card" style={{ width: 158, flexShrink: 0 }}>
+              <div className="skeleton-loader skeleton-book-cover" />
+              <div className="skeleton-loader skeleton-line" style={{ width: '82%' }} />
+              <div className="skeleton-loader skeleton-line" style={{ width: '52%' }} />
+            </div>
+          ))}
+        </div>
       </div>
     )
   }
@@ -149,15 +217,33 @@ export default function HomePage() {
     <>
       <div className="topbar home-topbar">
         <div className="home-topbar-greeting">
-          <div className="page-title">
+          <div className="page-title text-gradient-accent">
             {greeting()}
             {user?.display_name ? `，${user.display_name}` : ''}
           </div>
-          <div className="page-subtitle">今天也来读一会儿书吧</div>
+          {dailyQuote ? (
+            <div className="home-daily-quote-wrap">
+              <button
+                type="button"
+                className="page-subtitle home-daily-quote"
+                onClick={() => openDailyQuote(dailyQuote, navigate)}
+              >
+                <span className="home-daily-quote-text">{dailyQuote.quoted_text.trim().slice(0, 60)}</span>
+                <span className="home-daily-quote-book">《{dailyQuote.book_title}》</span>
+              </button>
+              <div className="home-daily-quote-popover" role="note" aria-hidden>
+                <Quote size={20} className="home-daily-quote-popover-mark" aria-hidden />
+                <p className="home-daily-quote-popover-text">{dailyQuote.quoted_text.trim()}</p>
+                <div className="home-daily-quote-popover-attr">—— 《{dailyQuote.book_title}》</div>
+              </div>
+            </div>
+          ) : (
+            <div className="page-subtitle">今天也来读一会儿书吧</div>
+          )}
         </div>
 
         <div className="home-topbar-search">
-          <label className="home-search-field">
+          <label className="home-search-field" onMouseMove={trackGlow}>
             <Search size={17} aria-hidden />
             <input
               className="input"
@@ -342,10 +428,11 @@ function SnippetCard({
   const [busy, setBusy] = useState(false)
   const [confirmOpen, setConfirmOpen] = useState(false)
   const isCitation = snippet.kind === 'citation'
+  const rawText = snippet.quoted_text || snippet.note || ''
   const text =
-    snippet.quoted_text.length > 160
-      ? `${snippet.quoted_text.slice(0, 160).trim()}…`
-      : snippet.quoted_text
+    rawText.length > 160
+      ? `${rawText.slice(0, 160).trim()}…`
+      : rawText
 
   function openBasket(e?: React.MouseEvent) {
     e?.stopPropagation()

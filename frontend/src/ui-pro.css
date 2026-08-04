@@ -1,0 +1,236 @@
+/* 
+  Moyin UI Pro Max - 12 Advanced Design Inspirations
+*/
+
+/* 1. Glassmorphism Panels */
+.glass-panel {
+  background: var(--glass-bg, rgba(28, 28, 31, 0.65));
+  backdrop-filter: blur(24px);
+  -webkit-backdrop-filter: blur(24px);
+  border: 1px solid var(--glass-border, rgba(255, 255, 255, 0.1));
+  border-radius: var(--radius-lg);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.15);
+}
+:root[data-theme='light'] .glass-panel {
+  background: var(--glass-bg, rgba(255, 255, 255, 0.65));
+  border-color: rgba(0, 0, 0, 0.05);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.05);
+}
+
+/* 2. Glow Borders for Cards
+   注意：抬升/缩放已交给 Framer Motion（见 CoverTilt.tsx）在同一节点写 inline
+   transform；这里绝不能再写 transform，否则会被内联样式静默吞掉，只留半成品动效。
+   这一层只负责 Motion 不接管的属性：描边光晕（独立的 ::before 伪元素）。 */
+.glow-border {
+  position: relative;
+}
+.glow-border::before {
+  content: '';
+  position: absolute;
+  inset: -1px;
+  border-radius: inherit;
+  background: linear-gradient(135deg, var(--accent-strong), transparent 60%);
+  z-index: -1;
+  opacity: 0;
+  transition: opacity 0.4s ease;
+  pointer-events: none;
+}
+.glow-border:hover::before,
+.glow-border:focus-within::before {
+  opacity: 0.55;
+}
+
+/* 3. Aurora Glow Backgrounds */
+.aurora-bg {
+  position: relative;
+  overflow: hidden;
+  /* 透明：让 body 上的环境光壁纸透出来，配合下方 ::before/::after 的光斑
+     叠加成更丰富的层次，而不是被这里的纯色背景整片盖死 */
+  background: transparent;
+}
+.aurora-bg::before,
+.aurora-bg::after {
+  content: '';
+  position: absolute;
+  width: 60vw;
+  height: 60vw;
+  border-radius: 50%;
+  filter: blur(80px);
+  z-index: 0;
+  pointer-events: none;
+  opacity: 0.4;
+  animation: aurora-drift 20s infinite alternate ease-in-out;
+}
+.aurora-bg::before {
+  top: -20%;
+  left: -10%;
+  background: radial-gradient(circle, var(--accent-soft-strong), transparent 70%);
+}
+.aurora-bg::after {
+  bottom: -20%;
+  right: -10%;
+  background: radial-gradient(circle, rgba(82, 168, 124, 0.15), transparent 70%);
+  animation-delay: -10s;
+}
+@keyframes aurora-drift {
+  0% { transform: translate(0, 0) scale(1); }
+  100% { transform: translate(10%, 5%) scale(1.1); }
+}
+
+/* 4. Skeleton Loaders */
+.skeleton-loader {
+  background: linear-gradient(90deg, var(--bg-2) 25%, var(--bg-3) 50%, var(--bg-2) 75%);
+  background-size: 200% 100%;
+  animation: shimmer 1.5s infinite linear;
+  border-radius: var(--radius-sm);
+}
+@keyframes shimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+
+/* 4.1 骨架屏组合：首页/书库首次加载时，用贴近真实版式的占位块代替单一转圈，
+   减少「白屏跳变」的突兀感，也呼应 uiverse 上流行的 skeleton screen 范式。 */
+.skeleton-page {
+  display: flex;
+  flex-direction: column;
+  gap: 28px;
+  padding-top: 4px;
+}
+.skeleton-row {
+  display: flex;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+.skeleton-block {
+  border-radius: var(--radius-md);
+  min-width: 200px;
+}
+.skeleton-book-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.skeleton-book-cover {
+  width: 100%;
+  aspect-ratio: 2 / 3;
+  border-radius: var(--radius-sm);
+}
+.skeleton-line {
+  height: 10px;
+  border-radius: 6px;
+}
+
+/* 5. Text Reveal & Gradients */
+.text-gradient-accent {
+  background: linear-gradient(135deg, var(--accent-strong), var(--accent));
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+/* 6. Inset Neumorphic Inputs (Soft Inner Shadow) */
+.inset-shadow {
+  background: var(--bg-1);
+  box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.2), 0 1px 0 rgba(255, 255, 255, 0.05);
+  border: 1px solid var(--border);
+  transition: box-shadow 0.2s ease, border-color 0.2s ease;
+}
+:root[data-theme='light'] .inset-shadow {
+  box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.05), 0 1px 0 rgba(255, 255, 255, 1);
+}
+.inset-shadow:focus-within {
+  border-color: var(--accent);
+  box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.1), 0 0 0 3px var(--accent-soft);
+}
+
+/* 7. Magnetic/Interactive Buttons */
+.btn-magnetic {
+  position: relative;
+  overflow: hidden;
+  transition: transform 0.2s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+.btn-magnetic:active {
+  transform: scale(0.92);
+}
+
+/* 9. Parallax Glare Enhancement for CoverTilt */
+.parallax-glare {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: radial-gradient(
+    220px circle at var(--mouse-x, 50%) var(--mouse-y, 0%),
+    rgba(255, 255, 255, 0.16),
+    transparent 60%
+  );
+  opacity: 0;
+  transition: opacity 0.3s ease;
+  z-index: 10;
+  border-radius: inherit;
+}
+.book-cover:hover .parallax-glare {
+  opacity: 1;
+}
+
+/* 光泽扫过：书本被"拿起"时一道极细的高光斜掠而过，只在 hover 的一瞬间跑一次 */
+.parallax-sheen {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 11;
+  border-radius: inherit;
+  overflow: hidden;
+}
+.parallax-sheen::after {
+  content: '';
+  position: absolute;
+  top: -60%;
+  left: -60%;
+  width: 60%;
+  height: 220%;
+  background: linear-gradient(
+    100deg,
+    transparent 20%,
+    rgba(255, 255, 255, 0.22) 48%,
+    transparent 76%
+  );
+  transform: translateX(-140%) rotate(8deg);
+  transition: transform 0.85s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.book-card:hover .parallax-sheen::after,
+.book-card:focus-within .parallax-sheen::after {
+  transform: translateX(220%) rotate(8deg);
+}
+
+/* Floating Badges */
+.book-rating-badge {
+  position: absolute;
+  left: 8px !important;
+  bottom: 8px !important;
+  right: auto !important;
+  top: auto !important;
+  background: var(--glass-bg, rgba(28,28,31,0.8));
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  color: var(--gold-strong);
+  font-weight: 700;
+  font-size: 11px;
+  padding: 4px 8px;
+  border-radius: 6px;
+  border: 1px solid var(--gold-soft-strong);
+  box-shadow: 0 4px 12px rgba(0,0,0,0.2);
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  transition: transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+:root[data-theme='light'] .book-rating-badge {
+  background: rgba(255,255,255,0.9);
+  box-shadow: 0 4px 12px rgba(0,0,0,0.06);
+}
+.book-card:hover .book-rating-badge {
+  transform: scale(1.08);
+}
+

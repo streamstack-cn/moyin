@@ -6,7 +6,6 @@ import {
   Highlighter,
   NotebookPen,
   Quote,
-  Search,
   Sparkles,
   X,
 } from 'lucide-react'
@@ -29,7 +28,6 @@ export interface SelectionBubbleProps {
   onAddToBasket: () => void
   onAddToNewBasket: (name: string) => void | Promise<void>
   onQuickFootnote: () => void
-  onSearchInBook?: () => void
   onDismiss: () => void
   containerWidth?: number
   containerHeight?: number
@@ -50,7 +48,6 @@ export default function SelectionBubble({
   onAddToBasket,
   onAddToNewBasket,
   onQuickFootnote,
-  onSearchInBook,
   onDismiss,
   containerWidth = 360,
   containerHeight = 640,
@@ -181,12 +178,7 @@ export default function SelectionBubble({
         <span>复制脚注</span>
       </button>
 
-      {onSearchInBook && (
-        <button type="button" className="selection-menu-item" role="menuitem" onClick={onSearchInBook}>
-          <Search size={16} />
-          <span>在本书内搜索</span>
-        </button>
-      )}
+
 
       <div className="selection-menu-page-row" title={pageTitle}>
         <BookMarked size={14} />

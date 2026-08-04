@@ -11,6 +11,7 @@ LibreOffice headless 把它转换成 .docx——转换出来的脚注是 Word �
 正式论文时手动核对。
 """
 
+import shutil
 import subprocess
 import uuid
 from pathlib import Path

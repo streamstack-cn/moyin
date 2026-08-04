@@ -1,17 +1,39 @@
 import { useState, type ReactNode } from 'react'
 import { useNavigate, useLocation, Link } from 'react-router-dom'
-import { Feather, Home, LayoutGrid, LogOut, Menu, Moon, ShieldCheck, Sun, X } from 'lucide-react'
+import { AnimatePresence, motion, useReducedMotion } from 'framer-motion'
+import { Feather, Home, LayoutGrid, LogOut, Menu, Moon, Lightbulb, ShieldCheck, Sun, X } from 'lucide-react'
 import { useAuth } from '../contexts/AuthContext'
 import { useTheme } from '../contexts/ThemeContext'
+import { easeOutExpo, inkRevealVariants, softSpring } from '../lib/motion'
 import { APP_VERSION_LABEL } from '../version'
 
 function NavItem({ to, icon, label }: { to: string; icon: ReactNode; label: string }) {
   const location = useLocation()
+  const reduceMotion = useReducedMotion()
   const active = location.pathname === to
   return (
     <Link to={to} className={`nav-link ${active ? 'active' : ''}`}>
-      {icon}
-      {label}
+      {active && (
+        reduceMotion ? (
+          <span className="nav-link-ink ui-gooey-nav-ink" aria-hidden />
+        ) : (
+          <motion.span className="nav-link-ink ui-gooey-nav-ink" layoutId="nav-ink" transition={softSpring} aria-hidden />
+        )
+      )}
+      <span className="nav-link-inner relative z-10" style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+        {active ? (
+          <motion.div
+            animate={{ rotate: [-5, 5, -5, 5, 0], scale: [1, 1.1, 1] }}
+            transition={{ duration: 0.6, ease: "easeInOut", repeat: Infinity, repeatDelay: 2 }}
+            style={{ display: 'flex' }}
+          >
+            {icon}
+          </motion.div>
+        ) : (
+          <div style={{ display: 'flex' }}>{icon}</div>
+        )}
+        {label}
+      </span>
     </Link>
   )
 }
@@ -20,10 +42,31 @@ export default function Layout({ children }: { children: ReactNode }) {
   const { user, logout } = useAuth()
   const { theme, toggleTheme } = useTheme()
   const navigate = useNavigate()
+  const location = useLocation()
+  const reduceMotion = useReducedMotion()
   const [mobileOpen, setMobileOpen] = useState(false)
 
   return (
     <div className="app-shell">
+      {/* SVG Filter for Gooey Nav Indicator */}
+      <svg width="0" height="0" className="absolute pointer-events-none">
+        <defs>
+          <filter id="gooey-nav-filter">
+            <feGaussianBlur in="SourceGraphic" stdDeviation="4" result="blur" />
+            <feColorMatrix 
+              in="blur" 
+              mode="matrix" 
+              values="
+                1 0 0 0 0  
+                0 1 0 0 0  
+                0 0 1 0 0  
+                0 0 0 18 -7" 
+              result="gooey" 
+            />
+            <feBlend in="SourceGraphic" in2="gooey" />
+          </filter>
+        </defs>
+      </svg>
       <div className="mobile-topbar">
         <button className="icon-btn" onClick={() => setMobileOpen(true)} aria-label="打开菜单">
           <Menu size={20} />
@@ -60,8 +103,10 @@ export default function Layout({ children }: { children: ReactNode }) {
           <NavItem to="/" icon={<Home size={17} />} label="首页" />
           <NavItem to="/library" icon={<LayoutGrid size={17} />} label="书库" />
           <NavItem to="/citation" icon={<Feather size={17} />} label="引用篮" />
+          <NavItem to="/ai-reader" icon={<Lightbulb size={17} />} label="AI 伴读" />
           {user?.role === 'admin' && <NavItem to="/admin" icon={<ShieldCheck size={17} />} label="管理后台" />}
         </nav>
+
 
         <div className="sidebar-footer">
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 10px' }}>
@@ -88,7 +133,30 @@ export default function Layout({ children }: { children: ReactNode }) {
         </div>
       </aside>
 
-      <div className="main-area">{children}</div>
+      <div className="main-area">
+        <AnimatePresence mode="wait">
+          <motion.div
+            key={location.pathname}
+            className="main-area-enter"
+            variants={reduceMotion ? undefined : inkRevealVariants}
+            initial={reduceMotion ? false : 'initial'}
+            animate="animate"
+            exit={reduceMotion ? undefined : 'exit'}
+          >
+            {!reduceMotion && (
+              <motion.div
+                className="ink-veil"
+                initial={{ opacity: 0.38, scaleY: 1 }}
+                animate={{ opacity: 0, scaleY: 0 }}
+                transition={{ duration: 0.55, ease: easeOutExpo }}
+                style={{ originY: 0 }}
+                aria-hidden
+              />
+            )}
+            {children}
+          </motion.div>
+        </AnimatePresence>
+      </div>
     </div>
   )
 }

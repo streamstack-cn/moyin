@@ -15,6 +15,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 import api_admin
+import api_ai_reader
 import api_auth
 import api_books
 import api_citation
@@ -99,6 +100,7 @@ app.include_router(api_tags.router)
 app.include_router(api_tags.collections_router)
 app.include_router(api_admin.router)
 app.include_router(api_admin.settings_router)
+app.include_router(api_ai_reader.router)
 
 
 @app.get("/api/health")

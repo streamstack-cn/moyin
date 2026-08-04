@@ -177,6 +177,9 @@ function EpubReaderPage({ bookId }: { bookId: string }) {
   const bookRef = useRef<Book | null>(null)
   const renditionRef = useRef<Rendition | null>(null)
   const currentHrefRef = useRef<string>('')
+  // 与 currentHrefRef 同步的 state 版本：仅用于让目录抽屉里的「当前章节」高亮跟着翻页实时刷新，
+  // ref 本身不会触发重渲染，所以两个都要维护。
+  const [currentHref, setCurrentHref] = useState<string>('')
   const currentCfiRef = useRef<string>('')
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const shellRef = useRef<HTMLDivElement>(null)
@@ -450,6 +453,7 @@ function EpubReaderPage({ bookId }: { bookId: string }) {
           'p, div, span, li, td, th, h1, h2, h3, h4, h5, h6, a': {
             '-webkit-user-select': 'text !important',
             'user-select': 'text !important',
+            color: `${themeColors.fg} !important`,
           },
         })
         // 恢复账号/本机记住的字号
@@ -600,6 +604,7 @@ function EpubReaderPage({ bookId }: { bookId: string }) {
             start: { href: string; percentage: number; cfi: string; displayed?: { page: number; total: number } }
           }) => {
             currentHrefRef.current = location.start.href
+            setCurrentHref(location.start.href)
             if (location.start.cfi) currentCfiRef.current = location.start.cfi
             if (epub.locations.length() > 0 || metaPageCountRef.current > 0 || (epub.pageList as unknown as { pages?: number[] })?.pages?.length) {
               syncPageFromCfi(location.start.cfi, location.start.percentage)
@@ -1626,6 +1631,13 @@ function EpubReaderPage({ bookId }: { bookId: string }) {
     return () => document.removeEventListener('fullscreenchange', handler)
   }, [])
 
+  useEffect(() => {
+    // 进入全屏：沉浸式隐藏顶/底栏；退出全屏（无论是按钮触发还是系统 Esc/手势触发）
+    // 都必须把顶/底栏找回来——否则用户退出全屏后会发现工具栏"消失了"，
+    // 只能靠盲点单击屏幕中间去猜怎么把它调出来。
+    setChromeVisible(!isFullscreen)
+  }, [isFullscreen])
+
   async function toggleFullscreen() {
     try {
       if (document.fullscreenElement) {
@@ -1660,6 +1672,11 @@ function EpubReaderPage({ bookId }: { bookId: string }) {
           color: `${colors.fg} !important`,
           '-webkit-user-select': 'text !important',
           'user-select': 'text !important',
+        },
+        'p, div, span, li, td, th, h1, h2, h3, h4, h5, h6, a': {
+          '-webkit-user-select': 'text !important',
+          'user-select': 'text !important',
+          color: `${colors.fg} !important`,
         },
       })
       // themes.default 后重新施加字号，避免被主题覆盖后看起来「没反应」
@@ -1807,32 +1824,6 @@ function EpubReaderPage({ bookId }: { bookId: string }) {
     } catch {
       /* ignore scrub glitches */
     }
-  }
-
-  function searchSelectionInBook() {
-    if (!selection?.text) return
-    const q = selection.text.slice(0, 80)
-    setSearchQuery(q)
-    setDrawerTab('search')
-    dismissSelection()
-    window.setTimeout(() => {
-      void (async () => {
-        if (!bookId || !q.trim()) return
-        clearSearchHighlights()
-        setSearching(true)
-        try {
-          const { results } = await api.get<{ results: SearchHit[] }>(
-            `/api/search/book/${bookId}?q=${encodeURIComponent(q)}`,
-          )
-          setSearchHighlightQuery(q)
-          setSearchResults(results)
-        } catch (err) {
-          toast.error(err instanceof ApiError ? err.message : '搜索失败')
-        } finally {
-          setSearching(false)
-        }
-      })()
-    }, 0)
   }
 
   async function addToBasket(targetProjectId?: string) {
@@ -2188,7 +2179,7 @@ function EpubReaderPage({ bookId }: { bookId: string }) {
 
       <ReaderReturnOriginBar visible={canNavBack} onReturn={goNavBack} onDismiss={dismissNavOrigin} />
 
-      <div className="reader-body">
+      <div className={`reader-body${drawerTab ? ' reader-body-drawer-open' : ''}`}>
         <div
           ref={viewerWrapRef}
           className={`reader-viewport ${layoutMode === 'a4' ? 'layout-a4' : 'layout-full'}`}
@@ -2252,7 +2243,6 @@ function EpubReaderPage({ bookId }: { bookId: string }) {
               onAddToBasket={() => void addToBasket()}
               onAddToNewBasket={(name) => addToNewBasket(name)}
               onQuickFootnote={() => void copyQuickFootnote()}
-              onSearchInBook={searchSelectionInBook}
               onDismiss={dismissSelection}
               containerWidth={viewerWrapRef.current?.clientWidth || 360}
               containerHeight={viewerWrapRef.current?.clientHeight || 640}
@@ -2325,11 +2315,13 @@ function EpubReaderPage({ bookId }: { bookId: string }) {
 
             {drawerTab === 'toc' && (
               <div className="reader-toc-list">
-                {flattenToc(toc).map(({ item, depth }) => (
+                {flattenToc(toc).map(({ item, depth }) => {
+                  const isActive = Boolean(currentHref) && item.href.split('#')[0] === currentHref.split('#')[0]
+                  return (
                   <button
                     key={item.id + item.href}
                     type="button"
-                    className="reader-toc-item"
+                    className={`reader-toc-item${isActive ? ' active' : ''}`}
                     style={{ paddingLeft: 16 + depth * 14 }}
                     onClick={(e) => {
                       e.preventDefault()
@@ -2344,7 +2336,8 @@ function EpubReaderPage({ bookId }: { bookId: string }) {
                   >
                     {item.label?.trim() || '未命名章节'}
                   </button>
-                ))}
+                  )
+                })}
                 {toc.length === 0 && <div className="empty-state">该书暂无目录信息</div>}
               </div>
             )}
@@ -2353,9 +2346,14 @@ function EpubReaderPage({ bookId }: { bookId: string }) {
               <div>
                 {highlights.length === 0 && <div className="empty-state">还没有高亮或笔记，选中正文文字即可创建</div>}
                 {highlights.map((h) => (
-                  <div key={h.id} className="highlight-item" onClick={() => void jumpTo(h.cfi_range)}>
+                  <div
+                    key={h.id}
+                    className="highlight-item"
+                    style={{ borderLeft: `3px solid ${h.color || 'transparent'}` }}
+                    onClick={() => void jumpTo(h.cfi_range)}
+                  >
                     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                      <div style={{ fontSize: 11.5, color: 'var(--ink-faint)' }}>
+                      <div style={{ fontSize: 11.5, color: 'var(--reader-muted)' }}>
                         <span className="highlight-swatch" style={{ background: h.color }} />
                         {h.chapter_title || '未分章'}
                       </div>
@@ -2372,7 +2370,7 @@ function EpubReaderPage({ bookId }: { bookId: string }) {
                     </div>
                     <div style={{ fontSize: 13.5, marginTop: 6, lineHeight: 1.6 }}>{h.quoted_text}</div>
                     {h.note && (
-                      <div style={{ fontSize: 12.5, marginTop: 6, color: 'var(--accent-strong)' }}>笔记：{h.note}</div>
+                      <div style={{ fontSize: 12.5, marginTop: 6, color: 'var(--reader-accent)' }}>笔记：{h.note}</div>
                     )}
                   </div>
                 ))}
@@ -2402,7 +2400,7 @@ function EpubReaderPage({ bookId }: { bookId: string }) {
                   {!searching &&
                     searchResults.map((r, i) => (
                       <div key={i} className="highlight-item" onClick={() => void jumpToSearchHit(r)}>
-                        <div style={{ fontSize: 11.5, color: 'var(--ink-faint)' }}>{r.chapter_title}</div>
+                        <div style={{ fontSize: 11.5, color: 'var(--reader-muted)' }}>{r.chapter_title}</div>
                         <div style={{ fontSize: 13, marginTop: 6, lineHeight: 1.6 }}>
                           <HighlightedText text={r.snippet} query={searchHighlightQuery} />
                         </div>

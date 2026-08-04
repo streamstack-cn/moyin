@@ -1,49 +1,77 @@
+@import './ui-pro.css';
 :root {
   color-scheme: dark;
-  --bg-0: #0e0d0b;
-  --bg-1: #16140f;
-  --bg-2: #1d1a14;
-  --bg-3: #262119;
-  --ink: #f3ecdd;
-  --ink-dim: #c9bfa8;
-  --ink-faint: #8d846f;
-  --accent: #d8a94e;
-  --accent-strong: #f0c26a;
-  --accent-soft: rgba(216, 169, 78, 0.16);
-  --accent-soft-strong: rgba(216, 169, 78, 0.32);
-  --danger: #e0685a;
-  --success: #6fb98f;
-  --border: rgba(216, 200, 164, 0.14);
-  --border-strong: rgba(216, 200, 164, 0.26);
-  --shadow: 0 12px 36px rgba(0, 0, 0, 0.45);
-  --card-bg: linear-gradient(180deg, rgba(38, 33, 25, 0.75), rgba(29, 26, 20, 0.75));
-  --radius-lg: 20px;
-  --radius-md: 14px;
-  --radius-sm: 9px;
+  /* Obsidian and Morandi Gray Dark */
+  --bg-0: #0d0d0e;
+  --bg-1: #141416;
+  --bg-2: #1c1c1f;
+  --bg-3: #27272a;
+  --ink: #f4f4f5;
+  --ink-dim: #d4d4d8;
+  --ink-faint: #a1a1aa;
+  /* Terracotta / Amber Gold */
+  --accent: #d97757;
+  --accent-strong: #e88868;
+  --accent-soft: rgba(217, 119, 87, 0.15);
+  --accent-soft-strong: rgba(217, 119, 87, 0.3);
+  --danger: #e15b64;
+  --success: #52a87c;
+  /* 评分/推荐专用暖金色：与主题强调色（terracotta / 纯黑）独立，两套主题下都保持"勋章金"的语义 */
+  --gold: #d3a94a;
+  --gold-strong: #e8c26a;
+  --gold-soft: rgba(211, 169, 74, 0.14);
+  --gold-soft-strong: rgba(211, 169, 74, 0.32);
+  /* AI 伴读素材语义色：笔记用暖紫，与高亮(--accent)/引用(--gold)区分 */
+  --note: #a08bf0;
+  --note-soft: rgba(160, 139, 240, 0.14);
+  --note-soft-strong: rgba(160, 139, 240, 0.32);
+  --border: rgba(255, 255, 255, 0.08);
+  --border-strong: rgba(255, 255, 255, 0.15);
+  --shadow: 0 16px 40px rgba(0, 0, 0, 0.5);
+  --card-bg: linear-gradient(180deg, rgba(39, 39, 42, 0.6), rgba(28, 28, 31, 0.8));
+  --radius-lg: 24px;
+  --radius-md: 16px;
+  --radius-sm: 10px;
   --font-serif: 'Noto Serif SC', 'PMingLiU', serif;
   --font-sans: 'Inter', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+  --glass-bg: rgba(28, 28, 31, 0.65);
+  --glass-border: rgba(255, 255, 255, 0.1);
+  /* 叠加在纯 --accent/--accent-strong 实底背景之上的文字/图标色：
+     深色主题的强调色是暖橙，配深棕字；浅色主题的强调色是纯黑，必须换成白字，
+     否则会出现"按钮字看不清"（深棕字叠在黑底上）的问题 */
+  --accent-ink: #1c1408;
 }
 
-/* 浅色模式 —— 苹果风格的暖白纸感配色，与深色模式共用同一套变量名 */
+/* 浅色模式 —— 高级黑白极简主义 */
 :root[data-theme='light'] {
   color-scheme: light;
-  --bg-0: #f6f4ef;
+  --bg-0: #f7f7f9;
   --bg-1: #ffffff;
-  --bg-2: #ffffff;
-  --bg-3: #f0ece2;
-  --ink: #2b2620;
-  --ink-dim: #5c5648;
-  --ink-faint: #938a76;
-  --accent: #b8863a;
-  --accent-strong: #96692a;
-  --accent-soft: rgba(184, 134, 58, 0.12);
-  --accent-soft-strong: rgba(184, 134, 58, 0.24);
-  --danger: #c0392b;
-  --success: #2e7d55;
-  --border: rgba(43, 38, 32, 0.1);
-  --border-strong: rgba(43, 38, 32, 0.18);
-  --shadow: 0 12px 30px rgba(43, 38, 32, 0.08);
-  --card-bg: linear-gradient(180deg, rgba(255, 255, 255, 0.92), rgba(250, 247, 239, 0.88));
+  --bg-2: #fcfcfc;
+  --bg-3: #f1f1f4;
+  --ink: #0a0a0b;
+  --ink-dim: #3a3a40;
+  --ink-faint: #73737d;
+  --accent: #0a0a0b;
+  --accent-strong: #000000;
+  --accent-soft: rgba(0, 0, 0, 0.04);
+  --accent-soft-strong: rgba(0, 0, 0, 0.08);
+  --danger: #d93844;
+  --success: #3c8d63;
+  --gold: #a5751c;
+  --gold-strong: #8a5f14;
+  --gold-soft: rgba(165, 117, 28, 0.1);
+  --gold-soft-strong: rgba(165, 117, 28, 0.22);
+  --note: #6d4fd6;
+  --note-soft: rgba(109, 79, 214, 0.08);
+  --note-soft-strong: rgba(109, 79, 214, 0.2);
+  --border: rgba(0, 0, 0, 0.06);
+  --border-strong: rgba(0, 0, 0, 0.12);
+  --shadow: 0 12px 32px rgba(0, 0, 0, 0.04);
+  --card-bg: linear-gradient(180deg, rgba(255, 255, 255, 1), rgba(253, 253, 253, 1));
+  --glass-bg: rgba(255, 255, 255, 0.85);
+  --glass-border: rgba(0, 0, 0, 0.04);
+  --accent-ink: #ffffff;
 }
 
 * {
@@ -75,10 +103,16 @@ body {
   font-family: var(--font-sans);
   min-height: 100vh;
   min-height: 100dvh;
+  /* 全局环境光"壁纸"：多组柔和大色块常驻 body 背后，作为所有毛玻璃面板
+     （侧栏/顶栏/卡片/弹层）backdrop-filter 真正能"透"出来的底色。
+     纯色背景上加 blur 是看不出任何毛玻璃感的——必须有色彩/明暗变化才行。 */
   background:
-    radial-gradient(circle at 15% -10%, rgba(216, 169, 78, 0.09), transparent 45%),
-    radial-gradient(circle at 90% 10%, rgba(216, 169, 78, 0.05), transparent 40%),
+    radial-gradient(ellipse 900px 700px at 8% -8%, var(--accent-soft-strong), transparent 60%),
+    radial-gradient(ellipse 800px 640px at 96% 6%, var(--gold-soft-strong), transparent 55%),
+    radial-gradient(ellipse 760px 620px at 88% 92%, var(--note-soft-strong), transparent 55%),
+    radial-gradient(ellipse 700px 560px at 4% 96%, var(--accent-soft), transparent 55%),
     var(--bg-0);
+  background-attachment: fixed;
   color: var(--ink);
   -webkit-font-smoothing: antialiased;
 }
@@ -88,12 +122,21 @@ body {
   max-width: 100%;
   min-height: 100vh;
   min-height: 100dvh;
-  background-color: var(--bg-0);
+  /* 透明：让 body 的环境光壁纸透到毛玻璃面板背后，而不是被这里的纯色背景挡死 */
+  background-color: transparent;
 }
 
 a {
   color: inherit;
   text-decoration: none;
+}
+
+/* 原生 checkbox/radio 在深色主题下默认是刺眼的系统蓝，管理后台等页面大量用到，
+   一行 accent-color 就能让它们跟随主题色，不用逐个重做成自定义组件 */
+input[type='checkbox'],
+input[type='radio'] {
+  accent-color: var(--accent);
+  cursor: pointer;
 }
 
 button {
@@ -105,11 +148,11 @@ button {
   height: 10px;
 }
 ::-webkit-scrollbar-thumb {
-  background: rgba(216, 200, 164, 0.18);
+  background: var(--border-strong);
   border-radius: 8px;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: rgba(216, 200, 164, 0.3);
+  background: var(--ink-faint);
 }
 
 /* ── 布局 ─────────────────────────────────────────────────────────── */
@@ -123,15 +166,17 @@ button {
   overflow-x: clip;
   padding-left: env(safe-area-inset-left, 0px);
   padding-right: env(safe-area-inset-right, 0px);
-  /* 与侧栏渐变末端同色：内容高于视口时，sticky 侧栏下方不再露异色空档 */
-  background-color: var(--bg-0);
+  /* 透明：露出 body 的环境光壁纸，侧栏/顶栏的毛玻璃 backdrop-filter 才有东西可"磨砂" */
+  background-color: transparent;
 }
 
 .sidebar {
   width: 232px;
   flex-shrink: 0;
-  background: linear-gradient(180deg, var(--bg-1), var(--bg-0));
-  border-right: 1px solid var(--border);
+  background: linear-gradient(180deg, color-mix(in srgb, var(--bg-1) 78%, transparent), color-mix(in srgb, var(--bg-0) 90%, transparent));
+  backdrop-filter: blur(28px) saturate(180%);
+  -webkit-backdrop-filter: blur(28px) saturate(180%);
+  border-right: 1px solid var(--glass-border);
   padding: 22px 16px;
   display: flex;
   flex-direction: column;
@@ -212,14 +257,6 @@ button {
   color: var(--accent-strong);
 }
 
-.nav-section-label {
-  font-size: 11px;
-  color: var(--ink-faint);
-  text-transform: uppercase;
-  letter-spacing: 0.1em;
-  padding: 16px 12px 6px;
-}
-
 .sidebar-footer {
   margin-top: auto;
   padding-top: 14px;
@@ -233,7 +270,23 @@ button {
   min-height: 100dvh;
   display: flex;
   flex-direction: column;
-  background-color: var(--bg-0);
+  /* 透明：这里之前是不透明的 --bg-0，把 body 的环境光壁纸整片盖死，
+     导致主内容区（页面绝大部分可视范围）完全看不出毛玻璃感 */
+  background-color: transparent;
+}
+
+/* 页面切换动画的包裹层（Layout.tsx 里的 motion.div），之前完全没有样式——
+   默认 display:block + flex:0 1 auto，导致它只按内容自然高度撑开，不会
+   撑满 .main-area 剩余空间；.page-content 的 flex:1 因为父级不是 flex 容器
+   而完全失效，只能按内容高度收缩。AI 伴读页因此出现「三栏区域下方一截空白，
+   跟页面环境光背景衔接处有明显颜色分界线」的问题——三栏区域内的毛玻璃/光斑
+   撑满的是这个偏矮的容器，容器以下露出的是完全没有叠加光斑的纯 body 背景。 */
+.main-area-enter {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  width: 100%;
 }
 
 /* ── 移动端顶栏 / 侧边栏抽屉（默认桌面端隐藏） ───────────────────────── */
@@ -297,7 +350,193 @@ button {
   margin-top: 4px;
 }
 
+/* 首页问候语下的「每日一句」：从我的高亮/引用里随机抽一条，取代死板的静态文案 */
+.home-daily-quote-wrap {
+  position: relative;
+  display: block;
+  min-width: 0;
+  max-width: 100%;
+}
+
+button.page-subtitle.home-daily-quote {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  padding: 0;
+  border: 0;
+  background: none;
+  cursor: pointer;
+  text-align: left;
+  font-family: inherit;
+  color: var(--ink-faint);
+  transition: color 0.2s ease;
+}
+
+button.page-subtitle.home-daily-quote:hover,
+button.page-subtitle.home-daily-quote:focus-visible {
+  color: var(--accent-strong);
+}
+
+/* 悬浮/聚焦「每日一句」：以卡片形式展开全文，仿 iOS 悬浮预览的材质与出场方式 */
+.home-daily-quote-popover {
+  position: absolute;
+  top: calc(100% + 12px);
+  left: 0;
+  z-index: 40;
+  width: min(440px, 88vw);
+  padding: 22px 24px 18px;
+  border-radius: var(--radius-lg);
+  background: color-mix(in srgb, var(--bg-0) 88%, black 6%);
+  border: 1px solid var(--glass-border);
+  box-shadow: 0 28px 60px -18px rgba(0, 0, 0, 0.55), 0 0 0 1px rgba(255, 255, 255, 0.03) inset;
+  backdrop-filter: blur(28px) saturate(160%);
+  -webkit-backdrop-filter: blur(28px) saturate(160%);
+  opacity: 0;
+  visibility: hidden;
+  transform: translateY(-6px) scale(0.96);
+  transform-origin: top left;
+  transition: opacity 0.28s cubic-bezier(0.16, 1, 0.3, 1), transform 0.32s cubic-bezier(0.16, 1, 0.3, 1),
+    visibility 0.32s;
+  pointer-events: none;
+}
+
+:root[data-theme='light'] .home-daily-quote-popover {
+  background: color-mix(in srgb, var(--bg-1) 92%, white 8%);
+  box-shadow: 0 24px 54px -20px rgba(20, 20, 22, 0.22), 0 0 0 1px rgba(0, 0, 0, 0.03) inset;
+}
+
+.home-daily-quote-wrap:hover .home-daily-quote-popover,
+.home-daily-quote-wrap:focus-within .home-daily-quote-popover {
+  opacity: 1;
+  visibility: visible;
+  transform: translateY(0) scale(1);
+  transition-delay: 0.1s;
+}
+
+.home-daily-quote-popover-mark {
+  color: var(--accent);
+  opacity: 0.55;
+  margin-bottom: 6px;
+}
+
+.home-daily-quote-popover-text {
+  margin: 0;
+  font-family: var(--font-serif);
+  font-size: 15.5px;
+  line-height: 1.85;
+  color: var(--ink);
+  white-space: pre-wrap;
+}
+
+.home-daily-quote-popover-attr {
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+  text-align: right;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--accent-strong);
+  letter-spacing: 0.02em;
+}
+
+@media (max-width: 720px) {
+  .home-daily-quote-popover {
+    display: none;
+  }
+}
+
+.home-daily-quote-text {
+  font-family: var(--font-serif);
+  font-style: italic;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+.home-daily-quote-book {
+  flex-shrink: 0;
+  font-size: 11.5px;
+  color: var(--ink-faint);
+  opacity: 0.75;
+}
+
+@media (max-width: 640px) {
+  .home-daily-quote-book {
+    display: none;
+  }
+}
+
 /* ── 书籍详情 ─────────────────────────────────────────────────────── */
+/* 登录页：过去完全用行内样式写死了一套脱离主题变量的深色 UI，
+   现在改回吃全局主题变量 + glass-panel，让它和其余页面统一在同一套视觉语言下，
+   背景也不再用纯色盖死 body 上的环境光渐变，而是让极光壁纸透出来。 */
+.login-page {
+  min-height: 100vh;
+  min-height: 100dvh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+}
+
+.login-card {
+  width: 100%;
+  max-width: 360px;
+  padding: 42px 30px 34px;
+}
+
+.login-brand {
+  text-align: center;
+  margin-bottom: 34px;
+}
+
+.login-brand-title {
+  font-family: var(--font-serif);
+  font-size: 32px;
+  font-weight: 800;
+  line-height: 1.2;
+  margin-bottom: 10px;
+}
+
+.login-brand-subtitle {
+  color: var(--ink-faint);
+  font-size: 13px;
+  letter-spacing: 0.03em;
+}
+
+.login-form .field {
+  margin-bottom: 18px;
+}
+
+.login-field-password {
+  margin-bottom: 26px !important;
+}
+
+.login-submit {
+  width: 100%;
+  height: 46px;
+  font-size: 15px;
+  margin-top: 2px;
+}
+
+.login-footer {
+  text-align: center;
+  font-size: 12px;
+  color: var(--ink-faint);
+  margin-top: 26px;
+  line-height: 1.6;
+}
+
+.login-version {
+  margin-top: 6px;
+  opacity: 0.7;
+  font-variant-numeric: tabular-nums;
+}
+
 .book-detail {
   display: flex;
   gap: 30px;
@@ -324,6 +563,71 @@ button {
 .book-detail-actions .btn {
   width: 100%;
   justify-content: center;
+}
+
+.book-detail-actions-primary {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.book-detail-actions-primary .btn-primary {
+  padding: 12px 16px;
+  font-size: 14.5px;
+  box-shadow: 0 8px 22px color-mix(in srgb, var(--accent-strong) 30%, transparent);
+}
+
+/* 次要动作（下载 / 收藏）：两栏并排，比过去一整列独占一行更紧凑 */
+.book-detail-actions-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.book-detail-actions-row .btn {
+  padding: 9px 8px;
+  font-size: 13px;
+}
+
+.book-detail-fav-on {
+  color: var(--gold-strong);
+  border-color: var(--gold-soft-strong);
+  background: var(--gold-soft);
+}
+
+/* 管理操作：单独分组、弱化视觉权重（比阅读/下载这类高频操作更淡），
+   两栏网格代替过去和阅读按钮混在一起的长条列表 */
+.book-detail-actions-label {
+  margin: 10px 0 -2px;
+  padding-top: 14px;
+  border-top: 1px dashed var(--border);
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+}
+
+.book-detail-actions-admin {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.book-detail-actions-admin .btn {
+  padding: 8px 6px;
+  font-size: 12.5px;
+  background: transparent;
+  color: var(--ink-dim);
+}
+
+.book-detail-actions-admin .btn:hover {
+  background: var(--bg-3);
+  color: var(--ink);
+}
+
+.book-detail-actions-danger {
+  margin-top: 2px;
 }
 
 .book-detail-main {
@@ -391,12 +695,51 @@ button {
   word-break: break-word;
 }
 
+/* 长目录默认折叠一部分高度，底部渐隐 + 「展开完整目录」按钮，
+   避免几十行目录把详情页拉得又长又满 */
+.book-detail-catalog-wrap {
+  position: relative;
+  max-height: 230px;
+  overflow: hidden;
+  transition: max-height 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.book-detail-catalog-wrap.expanded {
+  max-height: 4000px;
+}
+
+.book-detail-catalog-fade {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 68px;
+  background: linear-gradient(to bottom, transparent, var(--card-bg));
+  pointer-events: none;
+}
+
+.book-detail-catalog-toggle {
+  margin-top: 12px;
+}
+
+.book-detail-meta {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
+  gap: 0 28px;
+}
+
 .book-info-row {
   display: flex;
-  padding: 7px 0;
+  padding: 8px 2px;
   font-size: 13.5px;
   border-bottom: 1px solid var(--border);
   gap: 12px;
+  border-radius: 6px;
+  transition: background 0.15s ease;
+}
+
+.book-info-row:hover {
+  background: color-mix(in srgb, var(--accent) 6%, transparent);
 }
 
 .book-info-row:last-child {
@@ -424,29 +767,52 @@ button {
 }
 
 .reader-toc-item {
+  position: relative;
   display: block;
   width: 100%;
   text-align: left;
-  padding: 12px 16px;
+  padding: 13px 18px;
   border: 0;
   background: transparent;
-  color: var(--ink);
-  font-size: 14px;
-  line-height: 1.45;
+  color: var(--reader-ink, var(--ink));
+  font-size: 14.5px;
+  line-height: 1.5;
   cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
 }
 
 .reader-toc-item:hover,
 .reader-toc-item:active {
-  background: var(--bg-3);
+  background: color-mix(in srgb, var(--reader-ink, #3c4043) 6%, transparent);
+}
+
+/* 当前正在阅读的章节：左侧强调色竖条 + 字体加粗变色，
+   让用户翻页时一眼看出「我在目录里的哪里」，而不用凭空猜测 */
+.reader-toc-item.active {
+  color: var(--reader-accent, var(--accent));
+  font-weight: 700;
+  background: color-mix(in srgb, var(--reader-accent, var(--accent)) 10%, transparent);
+}
+
+.reader-toc-item.active::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 8px;
+  bottom: 8px;
+  width: 3px;
+  border-radius: 0 3px 3px 0;
+  background: var(--reader-accent, var(--accent));
 }
 
 /* ── 通用组件 ─────────────────────────────────────────────────────── */
 .card {
   background: var(--card-bg);
   border: 1px solid var(--border);
+  border-top-color: var(--glass-border);
   border-radius: var(--radius-lg);
-  backdrop-filter: blur(18px);
+  backdrop-filter: blur(18px) saturate(160%);
+  -webkit-backdrop-filter: blur(18px) saturate(160%);
   box-shadow: var(--shadow);
 }
 
@@ -469,7 +835,7 @@ button {
   cursor: pointer;
   white-space: nowrap;
   flex-shrink: 0;
-  transition: transform 0.12s, background 0.15s, border-color 0.15s;
+  transition: transform 0.32s cubic-bezier(0.34, 1.56, 0.64, 1), background 0.15s, border-color 0.15s, box-shadow 0.2s;
 }
 
 /* 输入框 + 搜索按钮：避免窄屏把「搜索」挤成竖排 */
@@ -530,15 +896,17 @@ button {
 .btn:hover {
   background: var(--accent-soft);
   border-color: var(--accent-soft-strong);
+  transform: translateY(-1.5px);
 }
 
 .btn:active {
-  transform: scale(0.97);
+  transform: scale(0.94) translateY(0);
+  transition-duration: 0.1s;
 }
 
 .btn-primary {
   background: linear-gradient(135deg, var(--accent-strong), var(--accent));
-  color: #1c1408;
+  color: var(--accent-ink);
   border-color: transparent;
 }
 
@@ -551,15 +919,6 @@ button {
   background: rgba(224, 104, 90, 0.12);
   border-color: rgba(224, 104, 90, 0.4);
   color: var(--danger);
-}
-
-.btn-ghost {
-  background: transparent;
-  border-color: transparent;
-}
-
-.btn-ghost:hover {
-  background: var(--bg-3);
 }
 
 .btn-sm {
@@ -625,10 +984,10 @@ textarea.input {
 
 .meta-source-filter {
   display: flex;
-  gap: 6px;
+  gap: 2px;
   margin-bottom: 14px;
-  padding: 4px;
-  border-radius: 12px;
+  padding: 3px;
+  border-radius: 999px;
   background: var(--bg-3);
 }
 
@@ -639,7 +998,7 @@ textarea.input {
   justify-content: center;
   gap: 6px;
   border: 0;
-  border-radius: 9px;
+  border-radius: 999px;
   padding: 8px 10px;
   background: transparent;
   color: var(--ink-faint);
@@ -655,9 +1014,9 @@ textarea.input {
 }
 
 .meta-source-filter-btn.active {
-  background: var(--bg-1);
-  color: var(--ink);
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.08);
+  background: var(--accent-soft);
+  color: var(--accent-strong);
+  font-weight: 600;
 }
 
 .meta-source-filter-count {
@@ -913,24 +1272,6 @@ textarea.input {
   }
 }
 
-/* ── 登录页 ──────────────────────────────────────────────────────── */
-.login-shell {
-  min-height: 100vh;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 24px;
-  background:
-    radial-gradient(circle at 20% 20%, rgba(216, 169, 78, 0.15), transparent 45%),
-    radial-gradient(circle at 80% 80%, rgba(216, 169, 78, 0.08), transparent 40%),
-    var(--bg-0);
-}
-
-.login-card {
-  width: min(100%, 380px);
-  padding: 40px 34px;
-}
-
 /* ── 书库网格 ────────────────────────────────────────────────────── */
 .toolbar {
   display: flex;
@@ -1071,6 +1412,9 @@ textarea.input {
   flex: 1;
   min-width: 200px;
   max-width: 420px;
+  isolation: isolate;
+  overflow: hidden;
+  border-radius: var(--radius-sm);
 }
 
 .search-box svg {
@@ -1079,10 +1423,67 @@ textarea.input {
   top: 50%;
   transform: translateY(-50%);
   color: var(--ink-faint);
+  z-index: 1;
 }
 
 .search-box input {
   padding-left: 36px;
+  position: relative;
+  z-index: 1;
+}
+
+/* 光标追踪极光光晕：鼠标在搜索框里移动时，一圈柔光跟随指针（见 lib/glowTrack.ts） */
+.search-box::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  border-radius: inherit;
+  background: radial-gradient(
+    170px circle at var(--glow-x, 50%) var(--glow-y, 0%),
+    color-mix(in srgb, var(--accent) 45%, transparent),
+    transparent 72%
+  );
+  opacity: 0;
+  transition: opacity 0.4s ease;
+  pointer-events: none;
+}
+
+.search-box:hover::before,
+.search-box:focus-within::before {
+  opacity: 1;
+}
+
+/* 通用光标追踪光晕：包一层在任意单个 .input 外面即可获得和搜索框一致的
+   极光效果，登录页等只有单个输入框的场景直接复用，不用重新写一套 */
+.glow-field {
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
+  border-radius: var(--radius-sm);
+}
+.glow-field::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  border-radius: inherit;
+  background: radial-gradient(
+    160px circle at var(--glow-x, 50%) var(--glow-y, 0%),
+    color-mix(in srgb, var(--accent) 45%, transparent),
+    transparent 72%
+  );
+  opacity: 0;
+  transition: opacity 0.4s ease;
+  pointer-events: none;
+}
+.glow-field:hover::before,
+.glow-field:focus-within::before {
+  opacity: 1;
+}
+.glow-field > .input {
+  position: relative;
+  z-index: 1;
 }
 
 .book-grid {
@@ -1093,11 +1494,23 @@ textarea.input {
 
 .book-card {
   cursor: pointer;
-  transition: transform 0.18s ease;
+  position: relative;
+  z-index: 0;
 }
 
-.book-card:hover {
-  transform: translateY(-5px);
+/* 悬浮/键盘聚焦时提升层级，避免放大的封面被下一张网格邻居盖住 */
+.book-card:hover,
+.book-card:focus-within,
+.book-card:focus-visible {
+  z-index: 6;
+}
+
+.book-card .book-title {
+  transition: color 0.25s ease;
+}
+
+.book-card:hover .book-title {
+  color: var(--accent-strong);
 }
 
 .book-cover {
@@ -1112,6 +1525,17 @@ textarea.input {
   align-items: center;
   justify-content: center;
   box-shadow: 0 10px 24px rgba(0, 0, 0, 0.4);
+  transition: box-shadow 0.35s cubic-bezier(0.16, 1, 0.3, 1), border-color 0.35s ease;
+  will-change: transform;
+}
+
+.book-card:hover .book-cover,
+.book-card:focus-within .book-cover {
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--border));
+  box-shadow:
+    0 22px 38px -12px rgba(0, 0, 0, 0.46),
+    0 8px 20px -6px color-mix(in srgb, var(--accent) 28%, transparent),
+    0 0 0 1px color-mix(in srgb, var(--accent) 16%, transparent) inset;
 }
 
 .book-cover img {
@@ -1137,16 +1561,20 @@ textarea.input {
   height: 24px;
   border-radius: 50%;
   background: rgba(14, 13, 11, 0.75);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
   color: #f0ecdf;
   display: flex;
   align-items: center;
   justify-content: center;
   opacity: 0;
-  transform: translateY(-4px);
-  transition: opacity 0.15s ease, transform 0.15s ease, background 0.15s ease, color 0.15s ease;
+  transform: translateY(-4px) scale(0.85);
+  transition: opacity 0.2s cubic-bezier(0.16, 1, 0.3, 1), transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1),
+    background 0.15s ease, color 0.15s ease;
   border: 0;
   padding: 0;
   cursor: pointer;
+  z-index: 3;
 }
 
 .book-download-btn {
@@ -1165,13 +1593,13 @@ textarea.input {
 .book-card:focus-visible .book-fav-btn,
 .book-fav-btn.active {
   opacity: 1;
-  transform: translateY(0);
+  transform: translateY(0) scale(1);
 }
 
 .book-download-btn:hover,
 .book-fav-btn:hover {
   background: var(--accent-strong);
-  color: #1c1408;
+  color: var(--accent-ink);
 }
 
 .book-fav-btn.active {
@@ -1219,9 +1647,22 @@ textarea.input {
 }
 
 .book-progress-fill {
+  position: relative;
   height: 100%;
   background: linear-gradient(90deg, var(--accent), var(--accent-strong));
   border-radius: 4px;
+  transition: width 0.7s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.book-progress-fill::after {
+  content: '';
+  position: absolute;
+  inset: 0 0 0 auto;
+  width: 6px;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.75);
+  filter: blur(1px);
+  opacity: 0.9;
 }
 
 .book-format-chip {
@@ -1249,6 +1690,8 @@ textarea.input {
 .book-format-chip.compact {
   top: 4px;
   right: 4px;
+  bottom: auto;
+  left: auto;
   padding: 1px 5px;
   font-size: 9px;
   border-radius: 4px;
@@ -1378,7 +1821,12 @@ textarea.input {
 /* ── 阅读器（Google Play Books：浅灰舞台 + 白顶底栏，避免黑底刺眼） ─ */
 .reader-shell {
   --reader-stage: #e8eaed;
-  --reader-chrome: rgba(255, 255, 255, 0.92);
+  /* 说明：正文渲染在 epub.js 的 iframe 里，backdrop-filter 无法跨 iframe 边界
+     采样合成正文像素（Chromium 的合成层限制），所以顶/底栏"能看到被模糊的文
+     字"这件事在当前 epub 渲染架构下做不到——这里把透明度定在 0.82，
+     兼顾可读性与"半透玻璃"质感，靠饱和度提升 + 高光 + 阴影层次来表达材质，
+     而不是靠盲目调低透明度（那样只会更难辨认，却换不来可见的模糊效果）。 */
+  --reader-chrome: rgba(255, 255, 255, 0.82);
   --reader-ink: #202124;
   --reader-muted: #5f6368;
   --reader-line: rgba(60, 64, 67, 0.12);
@@ -1393,14 +1841,20 @@ textarea.input {
   touch-action: manipulation;
   position: relative;
   overflow: hidden;
+  /* 实测过"让正文探到顶/底栏后面"的方案（靠扩大 .reader-body 让 epub 分页
+     容器变高）：几何上确实能让正文边缘伸到栏体范围内，但 backdrop-filter 
+     根本读不到 iframe 里的像素（见下方 --reader-chrome 注释），伸多少都是
+     白伸，还额外背上了"栏隐藏/显示时正文尺寸变化可能触发 epub.js 重新分页"
+     的风险。权衡下来去掉这个技巧，保持 0——正文老老实实待在两栏之间。 */
+  --reader-chrome-peek: 0px;
 }
 
 .reader-topbar {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 8px 16px;
-  padding-top: max(8px, env(safe-area-inset-top, 0px));
+  padding: 10px 18px;
+  padding-top: max(10px, env(safe-area-inset-top, 0px));
   border-bottom: 1px solid var(--reader-line);
   gap: 12px;
   position: absolute;
@@ -1409,12 +1863,14 @@ textarea.input {
   right: 0;
   z-index: 80;
   background: var(--reader-chrome);
-  backdrop-filter: blur(16px) saturate(1.2);
-  -webkit-backdrop-filter: blur(16px) saturate(1.2);
+  /* 更厚重的材质：大面积浮层要读起来比小气泡"更厚"——更强的模糊 + 饱和度，
+     顶部一条亮边模拟光线打在玻璃材质边缘上的效果（苹果毛玻璃惯用手法） */
+  backdrop-filter: blur(30px) saturate(1.8);
+  -webkit-backdrop-filter: blur(30px) saturate(1.8);
   color: var(--reader-ink);
-  min-height: 56px;
-  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.7) inset;
-  transition: transform 0.22s ease, opacity 0.22s ease;
+  min-height: 62px;
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.75) inset, 0 12px 28px -18px rgba(0, 0, 0, 0.25);
+  transition: transform 0.32s cubic-bezier(0.22, 1, 0.36, 1), opacity 0.26s ease;
   pointer-events: auto;
 }
 
@@ -1422,10 +1878,6 @@ textarea.input {
   transform: translateY(calc(-100% - 2px));
   opacity: 0;
   pointer-events: none;
-}
-
-.reader-mobile-toolbar {
-  display: none;
 }
 
 .reader-book-identity {
@@ -1535,22 +1987,29 @@ textarea.input {
   font-size: 20px;
 }
 
+/* 字号步进器：装进一个统一的胶囊容器里，跟项目其他地方的分段控件同一套语言，
+   而不是三个孤零零漂浮在顶栏上的按钮 */
 .reader-font-quick {
   display: inline-flex;
   align-items: center;
   gap: 2px;
-  margin-right: 2px;
+  margin-right: 4px;
+  padding: 3px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--reader-ink, #3c4043) 6%, transparent);
 }
 
 .reader-font-quick-btn {
   width: 36px !important;
   height: 36px !important;
+  border-radius: 999px !important;
 }
 
 .reader-font-quick-value {
-  min-width: 40px;
+  min-width: 42px;
   text-align: center;
-  font-size: 12px;
+  font-size: 12.5px;
+  font-weight: 600;
   font-variant-numeric: tabular-nums;
   color: var(--reader-muted);
   user-select: none;
@@ -1559,14 +2018,27 @@ textarea.input {
 .reader-topbar .icon-btn {
   color: var(--reader-muted);
   border-radius: 50%;
-  width: 40px;
-  height: 40px;
+  width: 42px;
+  height: 42px;
+  transition: background 0.18s ease, color 0.18s ease, transform 0.12s ease;
 }
 
 .reader-topbar .icon-btn:hover,
 .reader-topbar .icon-btn.active {
-  background: rgba(60, 64, 67, 0.08);
+  background: color-mix(in srgb, var(--reader-ink, #3c4043) 8%, transparent);
   color: var(--reader-ink);
+}
+
+.reader-topbar .icon-btn.active {
+  background: color-mix(in srgb, var(--reader-accent, #1a73e8) 14%, transparent);
+  color: var(--reader-accent, #1a73e8);
+}
+
+/* Apple 的第一条设计原则：反馈发生在按下的一瞬间，而不是等松开——
+   这里给所有阅读器图标按钮加上即时的按压回弹，让点击更"实"、更有分量感 */
+.reader-topbar .icon-btn:active,
+.reader-font-quick-btn:active {
+  transform: scale(0.88);
 }
 
 .reader-topbar-left {
@@ -1579,29 +2051,25 @@ textarea.input {
   z-index: 2;
 }
 
-.reader-topbar-center {
-  display: none;
-}
-
 .reader-bottombar {
   display: flex;
   align-items: center;
-  gap: 16px;
-  padding: 10px 20px;
-  padding-bottom: max(10px, env(safe-area-inset-bottom, 0px));
+  gap: 18px;
+  padding: 12px 22px;
+  padding-bottom: max(12px, env(safe-area-inset-bottom, 0px));
   border-top: 1px solid var(--reader-line);
   background: var(--reader-chrome);
-  backdrop-filter: blur(16px) saturate(1.2);
-  -webkit-backdrop-filter: blur(16px) saturate(1.2);
+  backdrop-filter: blur(30px) saturate(1.8);
+  -webkit-backdrop-filter: blur(30px) saturate(1.8);
   color: var(--reader-ink);
   position: absolute;
   left: 0;
   right: 0;
   bottom: 0;
   z-index: 70;
-  min-height: 56px;
-  box-shadow: 0 -1px 0 rgba(255, 255, 255, 0.65) inset;
-  transition: transform 0.22s ease, opacity 0.22s ease;
+  min-height: 62px;
+  box-shadow: 0 -1px 0 rgba(255, 255, 255, 0.7) inset, 0 -12px 28px -18px rgba(0, 0, 0, 0.22);
+  transition: transform 0.32s cubic-bezier(0.22, 1, 0.36, 1), opacity 0.26s ease;
   pointer-events: auto;
 }
 
@@ -1614,7 +2082,7 @@ textarea.input {
 .reader-scrubber {
   flex: 1;
   min-width: 0;
-  height: 18px;
+  height: 20px;
   -webkit-appearance: none;
   appearance: none;
   background: transparent;
@@ -1622,61 +2090,74 @@ textarea.input {
 }
 
 .reader-scrubber::-webkit-slider-runnable-track {
-  height: 2px;
+  height: 3px;
   border-radius: 999px;
-  background: linear-gradient(90deg, var(--reader-accent) var(--scrub-pct, 0%), #dadce0 var(--scrub-pct, 0%));
+  background: linear-gradient(90deg, var(--reader-accent) var(--scrub-pct, 0%), color-mix(in srgb, var(--reader-ink, #202124) 16%, transparent) var(--scrub-pct, 0%));
+  transition: height 0.15s ease;
 }
 
 .reader-scrubber::-webkit-slider-thumb {
   -webkit-appearance: none;
   appearance: none;
-  width: 12px;
-  height: 12px;
-  margin-top: -5px;
+  width: 15px;
+  height: 15px;
+  margin-top: -6px;
   border-radius: 50%;
   background: var(--reader-accent);
-  border: 2px solid #fff;
+  border: 2.5px solid #fff;
   box-shadow: 0 1px 4px rgba(26, 115, 232, 0.35);
+  transition: transform 0.18s cubic-bezier(0.34, 1.56, 0.64, 1), box-shadow 0.18s ease;
+}
+
+.reader-scrubber:hover::-webkit-slider-thumb,
+.reader-scrubber:active::-webkit-slider-thumb {
+  transform: scale(1.25);
+  box-shadow: 0 0 0 6px color-mix(in srgb, var(--reader-accent) 18%, transparent), 0 2px 6px rgba(26, 115, 232, 0.4);
 }
 
 .reader-scrubber::-moz-range-track {
-  height: 2px;
+  height: 3px;
   border-radius: 999px;
-  background: #dadce0;
+  background: color-mix(in srgb, var(--reader-ink, #202124) 16%, transparent);
 }
 
 .reader-scrubber::-moz-range-progress {
-  height: 2px;
+  height: 3px;
   border-radius: 999px;
   background: var(--reader-accent);
 }
 
 .reader-scrubber::-moz-range-thumb {
-  width: 12px;
-  height: 12px;
+  width: 15px;
+  height: 15px;
   border-radius: 50%;
   background: var(--reader-accent);
-  border: 2px solid #fff;
+  border: 2.5px solid #fff;
   box-shadow: 0 1px 4px rgba(26, 115, 232, 0.35);
+  transition: transform 0.18s cubic-bezier(0.34, 1.56, 0.64, 1);
 }
 
 .reader-bottombar-nav {
   display: flex;
   align-items: center;
-  gap: 2px;
+  gap: 4px;
   flex-shrink: 0;
 }
 
 .reader-bottombar .icon-btn {
   color: var(--reader-muted);
   border-radius: 50%;
-  width: 36px;
-  height: 36px;
+  width: 40px;
+  height: 40px;
 }
 
 .reader-bottombar .icon-btn:hover {
-  background: rgba(60, 64, 67, 0.08);
+  background: color-mix(in srgb, var(--reader-ink, #3c4043) 8%, transparent);
   color: var(--reader-ink);
+}
+
+.reader-bottombar .icon-btn:active {
+  transform: scale(0.9);
 }
 
 .reader-bottombar .reader-progress-meta,
@@ -1696,15 +2177,33 @@ textarea.input {
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 10px;
-  margin-bottom: 12px;
+  gap: 12px;
+  margin-bottom: 4px;
 }
 
 .theme-font-value {
   min-width: 3.5em;
   text-align: center;
-  font-size: 13px;
-  color: var(--ink-dim);
+  font-size: 13.5px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: var(--reader-ink, #202124);
+}
+
+/* theme-popover 里的图标按钮跟随浅色玻璃令牌，不继承 App 暗色主题的 --ink-dim */
+.theme-popover .icon-btn {
+  width: 38px;
+  height: 38px;
+  color: var(--reader-muted, #5f6368);
+}
+
+.theme-popover .icon-btn:hover {
+  background: color-mix(in srgb, var(--reader-ink, #3c4043) 8%, transparent);
+  color: var(--reader-ink, #202124);
+}
+
+.theme-popover .icon-btn:active {
+  transform: scale(0.92);
 }
 
 .reader-progress-jump {
@@ -1760,9 +2259,15 @@ textarea.input {
 
 .reader-body {
   position: absolute;
-  top: var(--reader-chrome-top, 64px);
+  /* 正文区比栏体的"占位高度"少让出 --reader-chrome-peek 那么多，
+     多出来的这一截会真的滑到顶/底栏毛玻璃的后面去，被模糊、揉碎——
+     这是毛玻璃可见的关键，而不是简单调高 blur() 数值。
+     注意：这个偏移只由 --reader-chrome-top/bottom（固定值）决定，跟
+     chromeVisible 的显隐动画完全无关，所以切换沉浸模式时正文尺寸不会跳变、
+     不会触发 epub.js 重新分页。 */
+  top: calc(var(--reader-chrome-top, 64px) - var(--reader-chrome-peek, 0px));
   right: 0;
-  bottom: var(--reader-chrome-bottom, 68px);
+  bottom: calc(var(--reader-chrome-bottom, 68px) - var(--reader-chrome-peek, 0px));
   left: 0;
   display: flex;
   min-height: 0;
@@ -2362,14 +2867,39 @@ textarea.input {
 
 .reader-drawer {
   width: 340px;
-  border-left: 1px solid var(--border);
-  background: var(--bg-1);
+  border-left: 1px solid var(--reader-line, var(--border));
+  /* 目录/笔记/搜索这类侧栏跟阅读正文并排展示，必须跟随阅读器自己的浅色玻璃
+     令牌（--reader-*），而不是会随 App 暗色主题变黑的 --bg-1——不然会出现
+     一半米黄纸感、一半纯黑侧栏的割裂感。 */
+  background: color-mix(in srgb, var(--reader-chrome, var(--bg-1)) 96%, transparent);
+  color: var(--reader-ink, var(--ink));
+  backdrop-filter: blur(20px) saturate(1.4);
+  -webkit-backdrop-filter: blur(20px) saturate(1.4);
   overflow-y: auto;
   display: flex;
   flex-direction: column;
   position: relative;
   z-index: 15;
   flex-shrink: 0;
+  box-shadow: -10px 0 30px -18px rgba(0, 0, 0, 0.25);
+  animation: reader-drawer-in 0.32s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+@keyframes reader-drawer-in {
+  from {
+    opacity: 0;
+    transform: translateX(16px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .reader-drawer {
+    animation: none;
+  }
 }
 
 .reader-drawer.wide {
@@ -2463,20 +2993,21 @@ textarea.input {
   min-height: 0;
 }
 
+/* 与「书架/标签/平铺」同一套胶囊分段控件视觉语言：满圆角外壳 + 满圆角按钮 + 柔和强调色底 */
 .journal-toolbar {
   display: inline-flex;
   align-self: flex-start;
-  gap: 0;
+  gap: 2px;
   margin: 12px 20px 0;
   padding: 3px;
-  border-radius: 10px;
+  border-radius: 999px;
   background: color-mix(in srgb, var(--journal-fg) 7%, transparent);
   border: 1px solid var(--journal-line);
 }
 
 .journal-mode-btn {
   padding: 6px 14px;
-  border-radius: 8px;
+  border-radius: 999px;
   font-size: 13px;
   border: 0;
   background: transparent;
@@ -2486,10 +3017,9 @@ textarea.input {
 }
 
 .journal-mode-btn.active {
-  background: color-mix(in srgb, var(--journal-bg) 92%, var(--journal-fg));
-  color: var(--journal-fg);
+  background: color-mix(in srgb, var(--reader-accent, var(--accent)) 16%, transparent);
+  color: var(--reader-accent, var(--accent-strong));
   font-weight: 600;
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.06);
 }
 
 .journal-editor {
@@ -2577,11 +3107,22 @@ textarea.input {
 }
 
 .reader-drawer-header {
-  padding: 16px 18px;
-  border-bottom: 1px solid var(--border);
+  padding: 18px 20px;
+  border-bottom: 1px solid var(--reader-line, var(--border));
   display: flex;
   align-items: center;
   justify-content: space-between;
+  font-size: 15px;
+  color: var(--reader-ink, var(--ink));
+}
+
+.reader-drawer-header .icon-btn {
+  color: var(--reader-muted, var(--ink-faint));
+}
+
+.reader-drawer-header .icon-btn:hover {
+  background: color-mix(in srgb, var(--reader-ink, #3c4043) 8%, transparent);
+  color: var(--reader-ink, var(--ink));
 }
 
 .icon-btn {
@@ -2595,12 +3136,18 @@ textarea.input {
   background: transparent;
   color: var(--ink-dim);
   cursor: pointer;
-  transition: background 0.15s, color 0.15s;
+  transition: background 0.15s, color 0.15s, transform 0.32s cubic-bezier(0.34, 1.56, 0.64, 1);
 }
 
 .icon-btn:hover {
   background: var(--bg-3);
   color: var(--ink);
+  transform: translateY(-1px) scale(1.06);
+}
+
+.icon-btn:active {
+  transform: scale(0.88);
+  transition-duration: 0.1s;
 }
 
 .icon-btn.active {
@@ -2610,12 +3157,40 @@ textarea.input {
 
 .highlight-item {
   padding: 14px 18px;
-  border-bottom: 1px solid var(--border);
+  border-bottom: 1px solid var(--reader-line, var(--border));
+  color: var(--reader-ink, var(--ink));
   cursor: pointer;
+  transition: background 0.15s ease;
 }
 
 .highlight-item:hover {
-  background: var(--bg-2);
+  background: color-mix(in srgb, var(--reader-ink, #3c4043) 6%, transparent);
+}
+
+/* 目录/笔记/搜索侧栏里的输入框与按钮也跟随阅读器浅色令牌，
+   否则暗色 App 主题下会出现一个深色输入框浮在浅色纸感侧栏里的违和感 */
+.reader-drawer .input {
+  background: color-mix(in srgb, var(--reader-chrome, #fff) 70%, transparent);
+  border-color: var(--reader-line, var(--border));
+  color: var(--reader-ink, var(--ink));
+}
+
+.reader-drawer .input::placeholder {
+  color: var(--reader-muted, var(--ink-faint));
+}
+
+.reader-drawer .input:focus {
+  border-color: var(--reader-accent, var(--accent-strong));
+}
+
+.reader-drawer .btn-primary {
+  background: var(--reader-accent, var(--accent));
+  border-color: var(--reader-accent, var(--accent));
+  color: #fff;
+}
+
+.reader-drawer .empty-state {
+  color: var(--reader-muted, var(--ink-faint));
 }
 
 .search-page-group {
@@ -2786,83 +3361,87 @@ mark.search-hit-mark,
   margin-right: 6px;
 }
 
-.color-dot {
-  width: 22px;
-  height: 22px;
-  border-radius: 50%;
-  cursor: pointer;
-  border: 2px solid transparent;
-}
-
-.color-dot.selected {
-  border-color: var(--ink);
-}
-
-.color-dot-custom {
-  position: relative;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  background: conic-gradient(from 0deg, #ff8a80, #ffd54f, #a5d6a7, #90caf9, #ce93d8, #ff8a80);
-  color: #1c1a16;
-  overflow: hidden;
-}
-
-.color-dot-custom input[type='color'] {
-  position: absolute;
-  inset: 0;
-  opacity: 0;
-  cursor: pointer;
-  width: 100%;
-  height: 100%;
-}
-
 .theme-popover {
-  /* fixed：不被 reader-shell overflow:hidden / 顶栏裁切 */
+  /* fixed：不被 reader-shell overflow:hidden / 顶栏裁切。
+     跟随阅读器顶/底栏同一套浅色毛玻璃材质（--reader-* 令牌），不再用会随 App
+     暗色主题变黑的 --bg-1，避免和旁边的浅色顶栏"一半黑一半白"地打架。 */
   position: fixed;
-  top: calc(var(--reader-chrome-top, 64px) + 8px);
+  top: calc(var(--reader-chrome-top, 64px) + 10px);
   right: 12px;
   z-index: 130;
-  background: var(--bg-1);
-  border: 1px solid var(--border-strong);
-  border-radius: var(--radius-md);
-  padding: 14px;
-  box-shadow: var(--shadow);
-  min-width: 220px;
+  background: color-mix(in srgb, var(--reader-chrome, #fff) 94%, transparent);
+  color: var(--reader-ink, #202124);
+  border: 1px solid var(--reader-line, rgba(0, 0, 0, 0.08));
+  border-radius: 20px;
+  padding: 18px;
+  box-shadow: 0 20px 48px -12px rgba(0, 0, 0, 0.28), 0 4px 14px rgba(0, 0, 0, 0.1),
+    0 0 0 1px rgba(255, 255, 255, 0.4) inset;
+  backdrop-filter: blur(26px) saturate(180%);
+  -webkit-backdrop-filter: blur(26px) saturate(180%);
+  min-width: 240px;
   pointer-events: auto;
   touch-action: manipulation;
+  transform-origin: top right;
+  animation: selection-menu-in 220ms cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 .theme-popover-title {
   font-size: 12px;
-  color: var(--ink-faint);
-  margin-bottom: 10px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: var(--reader-muted, #80868b);
+  margin-bottom: 11px;
+}
+
+.theme-popover-title:not(:first-child) {
+  margin-top: 16px;
 }
 
 .theme-swatch-row {
   display: flex;
-  gap: 10px;
+  gap: 11px;
   flex-wrap: wrap;
 }
 
 .theme-swatch {
-  width: 30px;
-  height: 30px;
+  width: 34px;
+  height: 34px;
   border-radius: 50%;
   cursor: pointer;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   border: 2px solid transparent;
-  transition: transform 0.15s ease;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12), 0 0 0 1px rgba(0, 0, 0, 0.05);
+  transition: transform 0.2s cubic-bezier(0.34, 1.56, 0.64, 1), box-shadow 0.2s ease, border-color 0.2s ease;
 }
 
 .theme-swatch:hover {
-  transform: scale(1.08);
+  transform: scale(1.12);
+  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.18), 0 0 0 1px rgba(0, 0, 0, 0.05);
+}
+
+.theme-swatch:active {
+  transform: scale(0.95);
 }
 
 .theme-swatch.active {
-  border-color: var(--accent-strong);
+  border-color: var(--reader-accent, #1a73e8);
+}
+
+.theme-swatch.active svg {
+  animation: theme-swatch-check-in 220ms cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+@keyframes theme-swatch-check-in {
+  from {
+    transform: scale(0.4);
+    opacity: 0;
+  }
+  to {
+    transform: scale(1);
+    opacity: 1;
+  }
 }
 
 .theme-swatch-custom {
@@ -2880,30 +3459,59 @@ mark.search-hit-mark,
   height: 100%;
 }
 
-/* Google Play Books 风格：纵向选区/右键菜单 */
+/* 选区功能气泡：与阅读器顶/底栏同一套"浅色毛玻璃"材质语言（--reader-* 令牌），
+   不再是写死的纯白 Google Docs 配色——无论阅读背景选了米白/护眼/薄荷/深灰/纯黑，
+   气泡本身都保持这套统一的高级浅色玻璃质感，同时体量、圆角、动效都向上对齐到
+   与主题弹层（每日一句悬浮卡等）一致的"materialize"出场方式。 */
 .selection-menu {
   position: absolute;
   z-index: 60;
-  width: 220px;
-  background: #fff;
-  color: #202124;
-  border-radius: 10px;
-  border: 1px solid rgba(0, 0, 0, 0.08);
-  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.18), 0 1px 3px rgba(0, 0, 0, 0.08);
-  padding: 6px 0 8px;
-  animation: selection-menu-in 140ms ease-out;
+  width: 240px;
+  /* 实测结论（重要）：这里的"正文"渲染在 epub.js 的独立 iframe 文档里，
+     Chromium 的 backdrop-filter 无法跨 iframe 边界采样合成——不管透明度、
+     模糊值怎么调，气泡背后永远看不到"真的被磨砂模糊的文字"，这是浏览器合
+     成层的硬限制，不是没写对 CSS。所以这里改用可靠能生效的"玻璃质感"配方：
+     略高的不透明度保证可读性 + 顶部高光 + 更深的分层阴影 + 饱和度提升，
+     视觉上仍然是"高级玻璃卡片"，只是不强行伪装成"能看穿的那种"。
+     backdrop-filter 依然保留：当气泡叠在别的玻璃面板（如主题弹窗）之上时，
+     或部分探出 iframe 区域时，模糊仍会真实生效。 */
+  background: linear-gradient(
+    165deg,
+    color-mix(in srgb, var(--reader-chrome, #fff) 96%, white 4%) 0%,
+    color-mix(in srgb, var(--reader-chrome, #fff) 88%, transparent) 100%
+  );
+  color: var(--reader-ink, #202124);
+  border-radius: 18px;
+  border: 1px solid var(--reader-line, rgba(0, 0, 0, 0.08));
+  box-shadow: 0 24px 54px -14px rgba(0, 0, 0, 0.32), 0 6px 18px rgba(0, 0, 0, 0.12),
+    0 0 0 1px rgba(255, 255, 255, 0.55) inset;
+  backdrop-filter: blur(36px) saturate(200%);
+  -webkit-backdrop-filter: blur(36px) saturate(200%);
+  padding: 8px 0 10px;
+  transform-origin: top center;
+  animation: selection-menu-in 220ms cubic-bezier(0.16, 1, 0.3, 1);
   pointer-events: auto;
 }
 
-/* 桌面锚定：left/top 已由 placeSelectionMenu 算好，动画只做轻微滑入 */
+.selection-menu.anchored-below {
+  transform-origin: top center;
+}
+
+.selection-menu.anchored-above {
+  transform-origin: bottom center;
+}
+
+/* materialize：轻微放大 + 上浮 + 淡入，像一片真实的玻璃材质浮现，而不是简单淡出淡入 */
 @keyframes selection-menu-in {
   from {
     opacity: 0;
-    transform: translateX(-6px);
+    transform: scale(0.92) translateY(4px);
+    filter: blur(4px);
   }
   to {
     opacity: 1;
     transform: none;
+    filter: blur(0);
   }
 }
 
@@ -2911,17 +3519,20 @@ mark.search-hit-mark,
   left: 50%;
   bottom: 72px;
   transform: translateX(-50%);
+  transform-origin: bottom center;
   animation-name: selection-menu-in-fallback;
 }
 
 @keyframes selection-menu-in-fallback {
   from {
     opacity: 0;
-    transform: translateX(-50%) translateY(8px);
+    transform: translateX(-50%) translateY(10px) scale(0.94);
+    filter: blur(4px);
   }
   to {
     opacity: 1;
-    transform: translateX(-50%) translateY(0);
+    transform: translateX(-50%) translateY(0) scale(1);
+    filter: blur(0);
   }
 }
 
@@ -2929,28 +3540,34 @@ mark.search-hit-mark,
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 4px 12px 8px;
+  padding: 5px 14px 9px;
   font-size: 11.5px;
   font-weight: 600;
-  color: #80868b;
-  letter-spacing: 0.02em;
+  color: var(--reader-muted, #80868b);
+  letter-spacing: 0.03em;
 }
 
 .selection-menu-close {
-  width: 24px;
-  height: 24px;
+  width: 26px;
+  height: 26px;
   border: 0;
   border-radius: 50%;
   background: transparent;
-  color: #5f6368;
+  color: var(--reader-muted, #5f6368);
   display: inline-flex;
   align-items: center;
   justify-content: center;
   cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease, transform 0.15s ease;
 }
 
 .selection-menu-close:hover {
-  background: rgba(60, 64, 67, 0.08);
+  background: color-mix(in srgb, var(--reader-ink, #3c4043) 8%, transparent);
+  color: var(--reader-ink, #202124);
+}
+
+.selection-menu-close:active {
+  transform: scale(0.88);
 }
 
 .selection-menu-item {
@@ -2958,26 +3575,31 @@ mark.search-hit-mark,
   display: flex;
   align-items: center;
   gap: 12px;
-  padding: 10px 16px;
+  padding: 11px 16px;
   border: 0;
   background: transparent;
-  color: #202124;
-  font-size: 13.5px;
+  color: var(--reader-ink, #202124);
+  font-size: 14px;
   text-align: left;
   cursor: pointer;
+  transition: background 0.15s ease;
 }
 
 .selection-menu-item:hover {
-  background: rgba(60, 64, 67, 0.06);
+  background: color-mix(in srgb, var(--reader-ink, #3c4043) 6%, transparent);
+}
+
+.selection-menu-item:active {
+  background: color-mix(in srgb, var(--reader-ink, #3c4043) 10%, transparent);
 }
 
 .selection-menu-item svg {
-  color: #5f6368;
+  color: var(--reader-muted, #5f6368);
   flex-shrink: 0;
 }
 
 .selection-menu-note {
-  padding: 0 12px 8px;
+  padding: 2px 14px 10px;
   display: flex;
   flex-direction: column;
   gap: 8px;
@@ -2987,192 +3609,135 @@ mark.search-hit-mark,
   width: 100%;
   resize: vertical;
   min-height: 64px;
-  border: 1px solid #dadce0;
-  border-radius: 8px;
-  padding: 8px 10px;
+  border: 1px solid var(--reader-line, #dadce0);
+  border-radius: 12px;
+  padding: 9px 11px;
   font-size: 13px;
   font-family: inherit;
-  color: #202124;
-  background: #fff;
+  color: var(--reader-ink, #202124);
+  background: color-mix(in srgb, var(--reader-chrome, #fff) 70%, transparent);
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.selection-menu-note-input:focus {
+  outline: none;
+  border-color: var(--reader-accent, #1a73e8);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--reader-accent, #1a73e8) 18%, transparent);
 }
 
 .selection-menu-new-basket-input {
   resize: none;
   min-height: 0;
-  height: 36px;
+  height: 38px;
   line-height: 20px;
+  border-radius: 999px;
+  padding-left: 14px;
 }
 
 .selection-menu-page-row {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 8px 14px;
-  color: #5f6368;
-  border-top: 1px solid #eee;
-  margin-top: 4px;
+  padding: 10px 14px 4px;
+  color: var(--reader-muted, #5f6368);
+  border-top: 1px solid var(--reader-line, #eee);
+  margin-top: 6px;
 }
 
 .selection-menu-page {
-  width: 56px;
-  border: 1px solid #dadce0;
-  border-radius: 6px;
-  padding: 4px 6px;
+  width: 58px;
+  border: 1px solid var(--reader-line, #dadce0);
+  border-radius: 999px;
+  padding: 5px 8px;
   font-size: 12px;
   text-align: center;
-  color: #202124;
-  background: #fff;
+  color: var(--reader-ink, #202124);
+  background: color-mix(in srgb, var(--reader-chrome, #fff) 70%, transparent);
 }
 
 .selection-menu-project {
   flex: 1;
   min-width: 0;
-  border: 1px solid #dadce0;
-  border-radius: 6px;
-  padding: 4px 6px;
+  border: 1px solid var(--reader-line, #dadce0);
+  border-radius: 999px;
+  padding: 5px 8px;
   font-size: 11.5px;
-  color: #202124;
-  background: #fff;
+  color: var(--reader-ink, #202124);
+  background: color-mix(in srgb, var(--reader-chrome, #fff) 70%, transparent);
 }
 
 .selection-menu-colors {
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 12px;
-  padding: 12px 14px 6px;
-  border-top: 1px solid #eee;
+  gap: 13px;
+  padding: 13px 14px 4px;
+  border-top: 1px solid var(--reader-line, #eee);
 }
 
 .selection-menu-colors-icon {
-  color: #80868b;
+  color: var(--reader-muted, #80868b);
 }
 
 .selection-menu-color {
-  width: 22px;
-  height: 22px;
+  width: 25px;
+  height: 25px;
   border-radius: 50%;
   border: 2px solid rgba(255, 255, 255, 0.9);
-  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.12);
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.12), 0 2px 6px rgba(0, 0, 0, 0.1);
   cursor: pointer;
   padding: 0;
+  transition: transform 0.18s cubic-bezier(0.34, 1.56, 0.64, 1), box-shadow 0.18s ease;
 }
 
 .selection-menu-color:hover {
-  transform: scale(1.08);
+  transform: scale(1.2) translateY(-2px);
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.12), 0 6px 14px rgba(0, 0, 0, 0.22);
 }
 
-/* 兼容旧类名（避免残留样式断裂） */
-.selection-bubble-colors {
+.selection-menu-color:active {
+  transform: scale(0.92);
+}
+
+.highlight-popover {
+  background: color-mix(in srgb, var(--reader-chrome, #fff) 94%, transparent);
+  color: var(--reader-ink, #202124);
+  border: 1px solid var(--reader-line, rgba(0, 0, 0, 0.08));
+  box-shadow: 0 16px 36px -10px rgba(0, 0, 0, 0.26), 0 3px 10px rgba(0, 0, 0, 0.1),
+    0 0 0 1px rgba(255, 255, 255, 0.4) inset;
+  backdrop-filter: blur(22px) saturate(180%);
+  -webkit-backdrop-filter: blur(22px) saturate(180%);
+  border-radius: 14px;
+  padding: 5px;
   display: flex;
-  align-items: center;
-  gap: 5px;
-}
-
-.selection-bubble-sep {
-  width: 1px;
-  height: 18px;
-  background: var(--border-strong);
-  margin: 0 2px;
-  flex-shrink: 0;
-}
-
-.selection-bubble-page {
-  width: 56px;
-  border: 0;
-  background: var(--bg-3);
-  color: var(--ink);
-  border-radius: 999px;
-  padding: 4px 6px;
-  font-size: 12px;
-  text-align: center;
-  outline: none;
-}
-
-.selection-bubble-project {
-  max-width: 96px;
-  border: 0;
-  background: var(--bg-3);
-  color: var(--ink);
-  border-radius: 999px;
-  padding: 4px 8px;
-  font-size: 12px;
-  outline: none;
-}
-
-.selection-bubble-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  border: 0;
-  background: var(--accent, #c9a227);
-  color: #1a160e;
-  border-radius: 999px;
-  padding: 5px 10px;
-  font-size: 12.5px;
-  font-weight: 600;
-  cursor: pointer;
-  white-space: nowrap;
-}
-
-.selection-bubble-btn:hover {
-  filter: brightness(1.05);
-}
-
-.selection-bubble-btn.ghost {
-  background: var(--bg-3);
-  color: var(--ink);
-  font-weight: 500;
-}
-
-.selection-bubble-close {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 26px;
-  height: 26px;
-  border: 0;
-  border-radius: 999px;
-  background: transparent;
-  color: var(--ink-faint);
-  cursor: pointer;
-}
-
-.selection-bubble-close:hover {
-  background: var(--bg-3);
-  color: var(--ink);
+  flex-direction: column;
+  animation: selection-menu-in 180ms cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 .highlight-popover {
   position: absolute;
   z-index: 70;
-  transform: translate(-50%, -110%);
-  min-width: 120px;
-  background: var(--bg-1);
-  border: 1px solid var(--border-strong);
-  border-radius: var(--radius-sm);
-  box-shadow: var(--shadow);
-  padding: 4px;
-  display: flex;
-  flex-direction: column;
+  min-width: 130px;
+  transform-origin: bottom center;
+  animation-name: highlight-popover-in;
 }
 
-.reader-context-menu {
-  position: fixed;
-  z-index: 80;
-  min-width: 168px;
-  background: var(--bg-1);
-  border: 1px solid var(--border-strong);
-  border-radius: var(--radius-sm);
-  box-shadow: var(--shadow);
-  padding: 4px;
-  display: flex;
-  flex-direction: column;
+@keyframes highlight-popover-in {
+  from {
+    opacity: 0;
+    transform: translate(-50%, -110%) scale(0.9);
+    filter: blur(3px);
+  }
+  to {
+    opacity: 1;
+    transform: translate(-50%, -110%) scale(1);
+    filter: blur(0);
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .selection-bubble,
-  .selection-bubble.fallback {
+  .selection-menu,
+  .highlight-popover {
     animation: none;
   }
 }
@@ -3225,6 +3790,59 @@ mark.search-hit-mark,
 
 .data-table tr:last-child td {
   border-bottom: none;
+}
+
+.data-table tbody tr {
+  transition: background 0.18s ease;
+}
+
+.data-table tbody tr:hover {
+  background: color-mix(in srgb, var(--accent) 5%, transparent);
+}
+
+/* 管理后台顶部分区：胶囊形分段控件，和设置弹层/日记工具栏统一同一套语言 */
+.admin-tabs {
+  display: inline-flex;
+  align-self: flex-start;
+  gap: 2px;
+  margin-bottom: 22px;
+  padding: 4px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--ink) 5%, transparent);
+  border: 1px solid var(--border);
+  flex-wrap: wrap;
+}
+
+.admin-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 8px 16px;
+  border-radius: 999px;
+  border: 0;
+  background: transparent;
+  color: var(--ink-faint);
+  font-size: 13.5px;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.2s ease, color 0.2s ease, transform 0.2s ease;
+}
+
+.admin-tab:hover {
+  color: var(--ink);
+  background: color-mix(in srgb, var(--ink) 6%, transparent);
+}
+
+.admin-tab.active {
+  background: var(--accent);
+  color: var(--accent-ink);
+  box-shadow: 0 3px 10px color-mix(in srgb, var(--accent) 45%, transparent);
+}
+
+.admin-tab.active:hover {
+  color: var(--accent-ink);
+  background: var(--accent);
 }
 
 /* ── 引用篮工作台 ────────────────────────────────────────────────── */
@@ -3317,11 +3935,16 @@ mark.search-hit-mark,
 .citation-panel {
   min-width: 0;
   border: 1px solid var(--border);
-  border-radius: var(--radius-md);
-  background: var(--bg-1);
+  border-top-color: var(--glass-border);
+  border-radius: var(--radius-lg);
+  background: var(--card-bg);
+  backdrop-filter: blur(18px) saturate(160%);
+  -webkit-backdrop-filter: blur(18px) saturate(160%);
+  box-shadow: var(--shadow);
   display: flex;
   flex-direction: column;
   min-height: 520px;
+  transition: box-shadow 0.3s ease, transform 0.3s ease;
 }
 
 .citation-panel-export {
@@ -3356,18 +3979,6 @@ mark.search-hit-mark,
   padding: 14px 16px 18px;
 }
 
-.citation-export-actions {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 10px;
-  padding: 14px 16px;
-}
-
-.citation-export-actions .btn {
-  justify-content: center;
-  width: 100%;
-}
-
 .citation-variant {
   display: inline-flex;
   padding: 3px;
@@ -3387,10 +3998,9 @@ mark.search-hit-mark,
 }
 
 .citation-variant button.active {
-  background: var(--bg-1);
-  color: var(--ink);
+  background: var(--accent-soft);
+  color: var(--accent-strong);
   font-weight: 600;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12);
 }
 
 .citation-preview-block {
@@ -3431,6 +4041,8 @@ mark.search-hit-mark,
   max-height: 220px;
   overflow: auto;
   padding-right: 4px;
+  bottom: auto;
+  left: auto;
 }
 
 .citation-preview-empty,
@@ -3472,6 +4084,13 @@ mark.search-hit-mark,
   background: var(--bg-2);
   margin-bottom: 10px;
   align-items: flex-start;
+  transition: border-color 0.22s ease, box-shadow 0.22s ease, transform 0.22s ease;
+}
+
+.citation-item:hover {
+  border-color: color-mix(in srgb, var(--accent) 35%, var(--border));
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.14);
+  transform: translateY(-1px);
 }
 
 .citation-item-cover {
@@ -3732,10 +4351,14 @@ mark.search-hit-mark,
 
 .home-topbar-greeting {
   min-width: 0;
+  /* 关键修复：flex-direction:column 的容器作为 grid item 时，若子项含
+     white-space:nowrap 的长文本，容器会按子项 max-content 撑开而不是拉伸
+     到轨道宽度，导致「每日一句」把搜索框顶飞/压住。显式 stretch 强制它
+     贴合 grid 分配的那一列宽度。 */
+  justify-self: stretch;
   display: flex;
   flex-direction: column;
   justify-content: center;
-  justify-self: start;
 }
 
 .home-topbar-greeting .page-title {
@@ -3749,10 +4372,13 @@ mark.search-hit-mark,
   display: flex;
   align-items: center;
   gap: 8px;
-  justify-self: center;
+  justify-self: stretch;
 }
 
 .home-search-field {
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
   flex: 1;
   min-width: 0;
   display: flex;
@@ -3765,12 +4391,40 @@ mark.search-hit-mark,
     linear-gradient(180deg, color-mix(in srgb, var(--bg-1) 88%, var(--accent-soft)), var(--bg-1));
   border: 1px solid var(--border-strong);
   box-shadow: 0 1px 0 color-mix(in srgb, var(--ink) 4%, transparent) inset;
-  transition: border-color 0.18s ease, box-shadow 0.18s ease;
+  transition: border-color 0.18s ease, box-shadow 0.18s ease, transform 0.18s ease;
 }
 
 .home-search-field:focus-within {
   border-color: color-mix(in srgb, var(--accent) 55%, var(--border-strong));
   box-shadow: 0 0 0 3px var(--accent-soft);
+  transform: translateY(-1px);
+}
+
+/* 光标追踪极光光晕（见 lib/glowTrack.ts + ui-pro.css 的极光输入灵感） */
+.home-search-field::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  border-radius: inherit;
+  background: radial-gradient(
+    170px circle at var(--glow-x, 50%) var(--glow-y, 0%),
+    color-mix(in srgb, var(--accent) 45%, transparent),
+    transparent 72%
+  );
+  opacity: 0;
+  transition: opacity 0.4s ease;
+  pointer-events: none;
+}
+
+.home-search-field:hover::before,
+.home-search-field:focus-within::before {
+  opacity: 1;
+}
+
+.home-search-field > * {
+  position: relative;
+  z-index: 1;
 }
 
 .home-search-field svg:first-child {
@@ -3814,7 +4468,7 @@ mark.search-hit-mark,
   gap: 14px;
   min-width: 0;
   min-height: 40px;
-  justify-self: end;
+  justify-self: stretch;
 }
 
 .home-library-btn {
@@ -3898,11 +4552,6 @@ button.home-snippet-badge-basket:hover {
   margin-left: 8px;
   font-size: 0.72em;
   font-weight: 500;
-  color: var(--ink-faint);
-}
-
-.home-section-hint {
-  font-size: 12.5px;
   color: var(--ink-faint);
 }
 
@@ -4374,9 +5023,21 @@ button.home-snippet-badge-basket:hover {
 }
 
 .continue-progress-fill {
+  position: relative;
   height: 100%;
   background: linear-gradient(90deg, var(--accent), var(--accent-strong));
   border-radius: 3px;
+  transition: width 0.7s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.continue-progress-fill::after {
+  content: '';
+  position: absolute;
+  inset: 0 0 0 auto;
+  width: 6px;
+  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.8);
+  filter: blur(1px);
 }
 
 .continue-meta {
@@ -4625,6 +5286,60 @@ button.stat-strip-item.clickable.active .stat-strip-value {
   flex-wrap: wrap;
 }
 
+/* 高分推荐：书籍内容区首行的推荐条，未读 + 按豆瓣评分排序，单行随屏宽自适应数量 */
+.library-recommend-section {
+  margin-bottom: 36px;
+  padding-bottom: 28px;
+  border-bottom: 1px solid var(--border);
+}
+
+.library-recommend-title {
+  color: var(--gold-strong);
+}
+
+.book-grid-row {
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(158px, 1fr);
+  overflow: hidden;
+}
+
+/* 书架拖拽排序 */
+.shelf-order-row {
+  transition: background 0.18s ease, opacity 0.18s ease, transform 0.18s ease;
+}
+
+.shelf-order-row.dragging {
+  opacity: 0.45;
+}
+
+.shelf-order-row.drag-over {
+  background: var(--accent-soft);
+  box-shadow: inset 0 0 0 1px var(--accent-soft-strong);
+}
+
+.shelf-order-handle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  flex-shrink: 0;
+  border-radius: 6px;
+  color: var(--ink-faint);
+  cursor: grab;
+  touch-action: none;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+.shelf-order-handle:hover {
+  background: var(--bg-3);
+  color: var(--ink);
+}
+
+.shelf-order-handle:active {
+  cursor: grabbing;
+}
+
 .book-card.selectable .book-cover {
   outline: 2px solid transparent;
   outline-offset: 1px;
@@ -4648,7 +5363,7 @@ button.stat-strip-item.clickable.active .stat-strip-value {
   display: flex;
   align-items: center;
   justify-content: center;
-  color: #1c1408;
+  color: var(--accent-ink);
   cursor: pointer;
   opacity: 1;
 }
@@ -4680,7 +5395,7 @@ button.stat-strip-item.clickable.active .stat-strip-value {
 
 .book-detail-btn:hover {
   background: var(--accent-strong);
-  color: #1c1408;
+  color: var(--accent-ink);
 }
 
 .tag-pill {
@@ -4919,8 +5634,10 @@ button.stat-strip-item.clickable.active .stat-strip-value {
     gap: 12px;
     padding: calc(10px + constant(safe-area-inset-top, 0px)) 14px 10px;
     padding: calc(10px + env(safe-area-inset-top, 0px)) 14px 10px;
-    border-bottom: 1px solid var(--border);
-    background: var(--bg-1);
+    border-bottom: 1px solid var(--glass-border);
+    background: var(--glass-bg);
+    backdrop-filter: blur(22px) saturate(180%);
+    -webkit-backdrop-filter: blur(22px) saturate(180%);
     position: sticky;
     top: 0;
     z-index: 40;
@@ -4933,7 +5650,7 @@ button.stat-strip-item.clickable.active .stat-strip-value {
 
   .app-shell {
     flex-direction: column;
-    background-color: var(--bg-0);
+    background-color: transparent;
   }
 
   .sidebar {
@@ -5018,10 +5735,6 @@ button.stat-strip-item.clickable.active .stat-strip-value {
   .citation-panel-export {
     position: static;
     min-height: 0;
-  }
-
-  .citation-export-actions {
-    grid-template-columns: 1fr;
   }
 
   .modal-backdrop {
@@ -5208,10 +5921,6 @@ button.stat-strip-item.clickable.active .stat-strip-value {
     justify-content: center;
   }
 
-  .reader-mobile-toolbar {
-    display: none !important;
-  }
-
   .reader-drawer,
   .reader-drawer.wide {
     position: fixed;
@@ -5220,7 +5929,18 @@ button.stat-strip-item.clickable.active .stat-strip-value {
     z-index: 120;
     padding-top: env(safe-area-inset-top, 0px);
     padding-bottom: env(safe-area-inset-bottom, 0px);
-    background: var(--bg-1);
+    background: color-mix(in srgb, var(--reader-chrome, var(--bg-1)) 97%, transparent);
+    animation: none;
+  }
+
+  /* 移动端目录/笔记/搜索/日记抽屉是 fixed 全屏覆盖层，但它在 DOM 上仍嵌套在
+     .reader-body 里——而 .reader-body 自己是 z-index:1 的绝对定位层，天生比
+     顶/底栏（z-index:80/70）低一级，形成了独立的层叠上下文。子元素哪怕写
+     z-index:120 也只能在 .reader-body 内部比大小，永远盖不住栏体，导致抽屉
+     自己的标题栏（"目录"+关闭按钮）被顶栏遮住看不见。这里在抽屉打开时把
+     .reader-body 整体的层叠层级抬到顶/底栏之上，抽屉才能真正铺满并遮住它们。 */
+  .reader-body-drawer-open {
+    z-index: 130;
   }
 
   .reader-drawer.journal {
@@ -5373,11 +6093,6 @@ button.stat-strip-item.clickable.active .stat-strip-value {
     display: none;
   }
 
-  .reader-fontsize-group,
-  .reader-fontsize-divider {
-    display: none !important;
-  }
-
   .reader-font-quick-value {
     display: none;
   }
@@ -5497,4 +6212,1428 @@ button.stat-strip-item.clickable.active .stat-strip-value {
   font-size: 12.5px;
   line-height: 1.7;
   color: var(--ink-dim);
+}
+
+/* ── AI 伴读页面布局 ────────────────────────────────────────────────────── */
+
+/* 通用毛玻璃卡片：AI 伴读三栏、素材卡、报告块、聊天面板等大量复用，
+   之前一直被引用却从未定义过样式，导致这些区域完全没有背景/边框/圆角——
+   这是「AI 伴读像没设计过」观感的根本原因之一。 */
+.glass-panel {
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-top-color: var(--glass-border);
+  border-radius: var(--radius-lg);
+  backdrop-filter: blur(20px) saturate(160%);
+  -webkit-backdrop-filter: blur(20px) saturate(160%);
+  box-shadow: var(--shadow);
+}
+
+/* 通用小节标题：图标徽章 + 文字 + 底部分隔线，替代原来完全无样式的裸标题 */
+.section-title {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  font-size: 13.5px;
+  font-weight: 700;
+  color: var(--ink);
+  letter-spacing: 0.01em;
+  padding-bottom: 13px;
+  margin-bottom: 14px;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+.section-title > svg:first-child {
+  flex-shrink: 0;
+  width: 26px;
+  height: 26px;
+  padding: 5px;
+  box-sizing: border-box;
+  border-radius: 8px;
+  color: var(--accent-strong);
+  background: var(--accent-soft);
+}
+
+/* 通用搜索/文本输入：书籍搜索框、AI 画像文本框、追问输入框共用 */
+.search-input {
+  width: 100%;
+  padding: 10px 14px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-strong);
+  background: var(--bg-2);
+  color: var(--ink);
+  font-size: 13.5px;
+  font-family: inherit;
+  outline: none;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease, background-color 0.2s ease;
+}
+
+.search-input::placeholder {
+  color: var(--ink-faint);
+}
+
+.search-input:focus {
+  border-color: var(--accent);
+  background: var(--bg-1);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
+/* 通用「标签 + 输入」纵向表单组，AI 画像设置里大量使用 */
+.form-group {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  margin-bottom: 18px;
+}
+
+.form-group:last-child {
+  margin-bottom: 0;
+}
+
+.form-group label {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--ink-faint);
+}
+
+/* 移动端「选书 / 素材 / 报告」切换标签 */
+.tab-btn {
+  flex: 1;
+  padding: 8px 12px;
+  border-radius: 999px;
+  border: 0;
+  background: transparent;
+  color: var(--ink-dim);
+  font-size: 12.5px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  min-width: 84px;
+}
+
+.tab-btn.active {
+  background: var(--accent-soft);
+  color: var(--accent-strong);
+}
+
+/* 移动端「书籍/素材/报告」切换：外壳做成统一的胶囊容器，内部按钮不再各自带边框，
+   跟「书架/标签/平铺」是同一套分段控件视觉语言 */
+.ai-reader-mobile-tabs {
+  display: none;
+  gap: 2px;
+  margin: 12px 32px 0;
+  padding: 3px;
+  border-radius: 999px;
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  flex-wrap: wrap;
+}
+
+/* 让 .page-content 用 flex:1 精确填满 topbar 之下的剩余空间——不再靠一个假设
+   topbar 固定高度的 100vh 减法（AI 伴读顶栏是两行标题+副标题，比假设的更高，
+   之前用 calc(100vh - 60px) 强制 min-height 会把整个外层页面撑出几十像素，
+   导致「整页」出现一个几乎看不出来但确实存在的纵向滚动——AI 追问触发
+   scrollIntoView 时会把这个外层滚动一起带下去，回不到顶部就是这个原因）。 */
+.ai-reader-page-content {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  min-height: 0;
+}
+
+.ai-reader-layout {
+  display: grid;
+  grid-template-columns: 240px 260px 1fr;
+  gap: 16px;
+  align-items: start;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.ai-reader-col-books,
+.ai-reader-col-material,
+.ai-reader-col-report {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0; /* for flex shrinking */
+}
+
+@media (max-width: 1024px) {
+  .ai-reader-layout {
+    grid-template-columns: 200px 220px 1fr;
+    gap: 12px;
+  }
+}
+
+@media (max-width: 800px) {
+  .ai-reader-mobile-tabs {
+    display: flex;
+    /* .page-content 在移动端已经有 16px 左右内边距，这里不能再叠加桌面态遗留的
+       32px margin，否则分段控件会比下面拉伸到整行宽度的面板明显窄一截、缩进对不齐 */
+    margin: 12px 0 0;
+  }
+
+  .ai-reader-page-content {
+    overflow: visible;
+  }
+
+  .ai-reader-layout {
+    display: flex;
+    flex-direction: column;
+    /* 桌面网格布局留下的 align-items: start 在 flex 场景里代表「横轴按内容宽度
+       收缩、贴左对齐」，导致移动端切出来的单个面板只有文字内容那么宽，
+       右边大片留白——这正是小屏下「选书/素材/报告」面板显示不全的根因，
+       必须显式改回 stretch 让面板撑满整行宽度。 */
+    align-items: stretch;
+    height: auto;
+    overflow: visible;
+  }
+
+  .ai-reader-col-books,
+  .ai-reader-col-material,
+  .ai-reader-col-report {
+    display: none;
+    width: 100%;
+    min-width: 0;
+    height: calc(100dvh - 210px);
+    min-height: 360px;
+  }
+
+  .ai-reader-col-books.mobile-visible,
+  .ai-reader-col-material.mobile-visible,
+  .ai-reader-col-report.mobile-visible {
+    display: flex !important;
+  }
+}
+
+/* ── AI 伴读：拾取选中圈 + 拨钮开关 ─────────────────────────────────────── */
+.ai-pick-circle {
+  width: 19px;
+  height: 19px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  border: 2px solid var(--border-strong);
+  background: transparent;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.2s ease, border-color 0.2s ease;
+}
+
+.ai-pick-circle.checked {
+  border-color: var(--accent);
+  background: var(--accent);
+}
+
+.ai-pick-circle svg {
+  width: 13px;
+  height: 13px;
+}
+
+.ai-tactile-toggle {
+  position: relative;
+  width: 40px;
+  height: 24px;
+  border-radius: 100px;
+  border: none;
+  cursor: pointer;
+  background: var(--bg-3);
+  box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.25);
+  flex-shrink: 0;
+  padding: 3px;
+  display: flex;
+  transition: background 0.25s ease;
+}
+
+.ai-tactile-toggle.on {
+  background: var(--accent);
+}
+
+.ai-tactile-knob {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.35);
+  margin-left: 0;
+}
+
+.ai-tactile-toggle.on .ai-tactile-knob {
+  margin-left: 16px;
+}
+
+/* ── AI 伴读：选书列表 ──────────────────────────────────────────────────── */
+.ai-book-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  flex: 1;
+  overflow-y: auto;
+  padding-right: 4px;
+  min-height: 0;
+}
+
+.ai-book-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 10px;
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  border: 1.5px solid transparent;
+  background: transparent;
+  text-align: left;
+  transition: background 0.2s ease, border-color 0.2s ease;
+}
+
+.ai-book-row:hover {
+  background: var(--bg-2);
+}
+
+.ai-book-row.selected {
+  background: var(--accent-soft);
+  border-color: color-mix(in srgb, var(--accent) 55%, transparent);
+}
+
+.ai-book-row-cover {
+  width: 36px;
+  height: 50px;
+  flex-shrink: 0;
+  border-radius: 4px;
+  overflow: hidden;
+  background: var(--bg-3);
+  box-shadow: 0 3px 8px rgba(0, 0, 0, 0.25);
+}
+
+.ai-book-row-cover img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.ai-book-row-main {
+  flex: 1;
+  min-width: 0;
+}
+
+.ai-book-row-title {
+  font-size: 13px;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--ink);
+}
+
+.ai-book-row-authors {
+  font-size: 11px;
+  color: var(--ink-faint);
+  margin-top: 2px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ai-book-row-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 4px;
+}
+
+.ai-status-pill {
+  font-size: 9.5px;
+  font-weight: 600;
+  padding: 1px 6px;
+  border-radius: 100;
+  border: 1px solid currentColor;
+  flex-shrink: 0;
+  line-height: 1.5;
+}
+
+/* 素材数量勋章 — 有素材的书用暖金强调，鼓励优先选择有笔记积累的书 */
+.ai-book-row-material-badge {
+  flex-shrink: 0;
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--gold-strong);
+  background: var(--gold-soft);
+  border-radius: 100px;
+  padding: 2px 7px;
+}
+
+/* ── AI 伴读：素材面板 ──────────────────────────────────────────────────── */
+.ai-material-card {
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+  margin-bottom: 10px;
+}
+
+.ai-material-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: var(--ink);
+  font-weight: 600;
+  font-size: 13px;
+  padding: 10px 14px;
+  text-align: left;
+}
+
+.ai-material-header-title {
+  flex: 1;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  font-family: var(--font-serif);
+}
+
+.ai-material-header-meta {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  flex-shrink: 0;
+}
+
+.ai-mini-format-tag {
+  font-size: 9.5px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  border: 1px solid transparent;
+}
+
+.ai-mini-format-tag.format-pdf {
+  background: rgba(138, 46, 42, 0.16);
+  color: #e8756c;
+  border-color: rgba(138, 46, 42, 0.35);
+}
+
+.ai-mini-format-tag.format-epub {
+  background: rgba(28, 92, 78, 0.18);
+  color: #5fcfae;
+  border-color: rgba(28, 92, 78, 0.4);
+}
+
+.ai-material-body {
+  padding: 4px 14px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  overflow: hidden;
+}
+
+.ai-material-empty {
+  text-align: center;
+  padding: 12px 0;
+  font-size: 12px;
+  color: var(--ink-faint);
+}
+
+.ai-material-item {
+  padding: 9px 30px 9px 12px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-2);
+  border-left: 2.5px solid var(--accent);
+  font-size: 12px;
+  position: relative;
+  transition: opacity 0.2s ease;
+}
+
+.ai-material-item.type-note {
+  border-left-color: var(--note);
+}
+
+.ai-material-item.type-citation {
+  border-left-color: var(--gold);
+}
+
+.ai-material-item.excluded {
+  opacity: 0.45;
+}
+
+.ai-material-item-text {
+  color: var(--ink);
+  line-height: 1.65;
+}
+
+/* 读书笔记里常见的 Markdown 标题/列表，压成和素材卡片相称的小尺寸排版，
+   而不是像正文一样占用大量空间——避免「##」「###」原样露出的杂乱感 */
+.ai-material-note-md > :first-child {
+  margin-top: 0;
+}
+.ai-material-note-md > :last-child {
+  margin-bottom: 0;
+}
+.ai-material-note-md h1,
+.ai-material-note-md h2,
+.ai-material-note-md h3,
+.ai-material-note-md h4 {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--ink);
+  margin: 10px 0 4px;
+  line-height: 1.5;
+}
+.ai-material-note-md p {
+  margin: 4px 0;
+}
+.ai-material-note-md ul,
+.ai-material-note-md ol {
+  margin: 4px 0;
+  padding-left: 18px;
+}
+.ai-material-note-md li {
+  margin: 2px 0;
+}
+.ai-material-note-md strong {
+  color: var(--ink);
+}
+.ai-material-note-md code {
+  background: color-mix(in srgb, var(--ink) 8%, transparent);
+  padding: 1px 5px;
+  border-radius: 4px;
+  font-size: 12px;
+}
+
+.ai-material-item.excluded .ai-material-item-text,
+.ai-material-item.excluded .ai-material-item-note,
+.ai-material-item.excluded .ai-material-item-group {
+  text-decoration: line-through;
+}
+
+.ai-material-item-note {
+  color: var(--ink-faint);
+  margin-top: 5px;
+  font-size: 11px;
+  display: flex;
+  gap: 4px;
+  align-items: flex-start;
+}
+
+.ai-material-item-group {
+  color: var(--ink-faint);
+  margin-top: 5px;
+  font-size: 11px;
+}
+
+.ai-material-item-label {
+  font-size: 10px;
+  color: var(--note);
+  margin-bottom: 5px;
+  display: flex;
+  gap: 4px;
+  align-items: center;
+  font-weight: 600;
+}
+
+.ai-material-item-toggle {
+  position: absolute;
+  right: 6px;
+  top: 6px;
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: var(--ink-faint);
+  padding: 4px;
+  border-radius: 4px;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+.ai-material-item-toggle:hover {
+  background: var(--bg-3);
+}
+
+.ai-material-item.type-highlight .ai-material-item-toggle.is-excluded {
+  color: var(--accent);
+}
+.ai-material-item.type-note .ai-material-item-toggle.is-excluded {
+  color: var(--note);
+}
+.ai-material-item.type-citation .ai-material-item-toggle.is-excluded {
+  color: var(--gold);
+}
+
+/* ── AI 伴读：素材来源全文开关 ──────────────────────────────────────────── */
+.ai-fulltext-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: var(--radius-md);
+  background: var(--bg-2);
+  margin-bottom: 12px;
+}
+
+.ai-fulltext-toggle-label {
+  font-size: 12px;
+  color: var(--ink);
+  font-weight: 500;
+}
+
+.ai-fulltext-toggle-hint {
+  font-size: 10.5px;
+  color: var(--ink-faint);
+  margin-top: 2px;
+}
+
+/* ── AI 伴读：报告区头部（标题 + 历史/生成按钮）───────────────────────────
+   之前左侧标题容器带 minWidth:0、右侧按钮组带 flexShrink:0，窄屏下标题区
+   会被挤压到几乎没有宽度，中文标题「伴读助手」失去换行边界后逐字竖排，
+   非常难看。这里拆成独立类名，宽屏保持一行，窄屏改为标题独占一行、
+   按钮组另起一行且允许换行，两者都不再依赖会失控的 flex 收缩。 */
+.ai-report-head {
+  justify-content: space-between;
+  flex-wrap: wrap;
+  row-gap: 10px;
+}
+
+.ai-report-head-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  flex-wrap: wrap;
+  row-gap: 4px;
+}
+
+.ai-report-head-title-text {
+  white-space: nowrap;
+}
+
+.ai-report-head-time {
+  font-size: 11px;
+  color: var(--ink-faint);
+  font-weight: 400;
+  white-space: nowrap;
+}
+
+.ai-report-head-actions {
+  display: flex;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+@media (max-width: 800px) {
+  .ai-report-head-title {
+    flex-basis: 100%;
+  }
+
+  .ai-report-head-actions {
+    flex-basis: 100%;
+  }
+
+  .ai-report-head-actions .btn,
+  .ai-report-head-actions .ai-generate-btn {
+    flex: 1;
+    justify-content: center;
+  }
+}
+
+/* ── AI 伴读：生成 / 报告区 ─────────────────────────────────────────────── */
+.ai-generate-btn {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 16px;
+  border-radius: 100px;
+  border: none;
+  cursor: pointer;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: #fff;
+  background: linear-gradient(135deg, var(--accent), var(--accent-strong));
+  box-shadow: 0 6px 18px -6px color-mix(in srgb, var(--accent) 60%, transparent);
+  transition: box-shadow 0.25s ease, transform 0.15s ease;
+  overflow: hidden;
+}
+
+.ai-generate-btn::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(100deg, transparent 30%, rgba(255, 255, 255, 0.35) 50%, transparent 70%);
+  transform: translateX(-120%);
+  transition: transform 0.7s ease;
+}
+
+.ai-generate-btn:hover:not(:disabled)::after {
+  transform: translateX(120%);
+}
+
+.ai-generate-btn:hover:not(:disabled) {
+  box-shadow: 0 8px 22px -6px color-mix(in srgb, var(--accent) 75%, transparent);
+}
+
+.ai-generate-btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.ai-generate-btn-stop {
+  background: color-mix(in srgb, var(--danger, #e5484d) 88%, black 6%);
+  box-shadow: 0 6px 18px -6px color-mix(in srgb, var(--danger, #e5484d) 55%, transparent);
+}
+
+.ai-generate-btn-stop:hover {
+  box-shadow: 0 8px 22px -6px color-mix(in srgb, var(--danger, #e5484d) 70%, transparent);
+}
+
+.ai-streaming-panel {
+  padding: 22px 20px;
+  border-radius: var(--radius-lg);
+  min-height: 320px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* 生成中的加载动效：三个呼吸律动的光点，替代之前直接糊一屏原始流式文本 */
+.ai-generating-anim {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 18px;
+  text-align: center;
+  padding: 24px;
+}
+
+.ai-generating-orb {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.ai-generating-orb span {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, var(--accent), var(--accent-strong));
+  animation: ai-orb-pulse 1.4s ease-in-out infinite;
+}
+
+.ai-generating-orb span:nth-child(2) {
+  animation-delay: 0.18s;
+}
+
+.ai-generating-orb span:nth-child(3) {
+  animation-delay: 0.36s;
+}
+
+@keyframes ai-orb-pulse {
+  0%, 80%, 100% {
+    transform: scale(0.6);
+    opacity: 0.4;
+  }
+  40% {
+    transform: scale(1.15);
+    opacity: 1;
+  }
+}
+
+.ai-generating-text {
+  font-size: 14.5px;
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.ai-generating-hint {
+  font-size: 12px;
+  color: var(--ink-faint);
+  max-width: 320px;
+  line-height: 1.6;
+}
+
+.ai-report-section {
+  padding: 20px;
+  border-radius: var(--radius-lg);
+  margin-bottom: 12px;
+}
+
+.ai-report-section-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 12px;
+  color: var(--ink);
+  font-weight: 600;
+  font-size: 14px;
+  font-family: var(--font-serif);
+}
+
+.ai-report-section-head svg {
+  color: var(--accent);
+}
+
+.ai-report-section-body {
+  color: var(--ink-dim);
+  font-size: 13.5px;
+  line-height: 1.9;
+  white-space: pre-wrap;
+}
+
+.ai-report-textarea {
+  width: 100%;
+  min-height: 120px;
+  background: var(--bg-1);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 12px;
+  color: var(--ink);
+  font-size: 13.5px;
+  line-height: 1.6;
+  resize: vertical;
+  font-family: inherit;
+}
+
+.ai-report-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  /* 之前这里是负 margin，把按钮往下拉到紧贴（甚至嵌进）下面卡片的圆角边框上，
+     两者的圆角完全对不上，看起来像按钮"糊"在卡片边缘一样别扭。改成正常的
+     正向间距，让按钮和卡片之间有干净的呼吸空间。 */
+  margin-bottom: 12px;
+}
+
+.ai-report-raw-wrap {
+  position: relative;
+}
+
+.ai-report-raw-edit-btn {
+  position: absolute;
+  right: 0;
+  top: -38px;
+}
+
+/* ── AI 伴读：追问对话 ──────────────────────────────────────────────────── */
+.ai-chat-panel {
+  margin-top: 18px;
+  padding: 16px 18px;
+  border-radius: var(--radius-lg);
+}
+
+.ai-chat-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 14px;
+  font-weight: 600;
+  font-size: 13px;
+}
+
+.ai-chat-head svg {
+  color: var(--accent);
+}
+
+.ai-chat-messages {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-bottom: 14px;
+  max-height: 350px;
+  overflow-y: auto;
+}
+
+.ai-chat-empty {
+  padding: 20px 0;
+  text-align: center;
+  color: var(--ink-faint);
+  font-size: 12px;
+}
+
+.ai-chat-quick-prompts {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 12px;
+  align-items: center;
+}
+
+.ai-chat-quick-prompt {
+  padding: 6px 14px;
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  border-radius: 100px;
+  font-size: 12px;
+  color: var(--ink);
+  cursor: pointer;
+  transition: background 0.2s ease, border-color 0.2s ease;
+}
+
+.ai-chat-quick-prompt:hover {
+  background: var(--accent-soft);
+  border-color: color-mix(in srgb, var(--accent) 40%, transparent);
+  color: var(--accent-strong);
+}
+
+.ai-chat-bubble {
+  padding: 9px 13px;
+  border-radius: var(--radius-md);
+  background: var(--bg-2);
+  align-self: flex-start;
+  max-width: 90%;
+  font-size: 13.5px;
+  line-height: 1.7;
+}
+
+.ai-chat-bubble.user {
+  background: var(--accent-soft);
+  align-self: flex-end;
+  color: var(--ink);
+}
+
+.ai-chat-typing {
+  display: inline-flex;
+  gap: 3px;
+  padding: 10px 13px;
+  border-radius: var(--radius-md);
+  background: var(--bg-2);
+  align-self: flex-start;
+}
+
+.ai-chat-typing span {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--ink-faint);
+  animation: ai-typing-bounce 1s infinite ease-in-out;
+}
+.ai-chat-typing span:nth-child(2) { animation-delay: 0.15s; }
+.ai-chat-typing span:nth-child(3) { animation-delay: 0.3s; }
+
+@keyframes ai-typing-bounce {
+  0%, 60%, 100% { transform: translateY(0); opacity: 0.5; }
+  30% { transform: translateY(-3px); opacity: 1; }
+}
+
+.ai-chat-input-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+/* ── AI 伴读：历史抽屉 ──────────────────────────────────────────────────── */
+.ai-history-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+  z-index: 999;
+  display: flex;
+  justify-content: flex-end;
+  backdrop-filter: blur(2px);
+}
+
+.ai-history-drawer {
+  width: 400px;
+  max-width: 100vw;
+  background: var(--bg-1);
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  border-left: 1px solid var(--border);
+}
+
+.ai-history-drawer-head {
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.ai-history-drawer-head-title {
+  font-weight: 600;
+  color: var(--ink);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-family: var(--font-serif);
+}
+
+.ai-history-drawer-close {
+  background: none;
+  border: none;
+  color: var(--ink-faint);
+  cursor: pointer;
+  padding: 4px;
+  border-radius: 6px;
+  transition: background 0.15s ease;
+}
+.ai-history-drawer-close:hover {
+  background: var(--bg-2);
+}
+
+.ai-history-drawer-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 18px;
+}
+
+.ai-history-empty {
+  color: var(--ink-faint);
+  text-align: center;
+  margin-top: 40px;
+  font-size: 13px;
+}
+
+.ai-history-item {
+  padding: 13px;
+  border-radius: var(--radius-md);
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  margin-bottom: 12px;
+  transition: border-color 0.2s ease;
+}
+
+.ai-history-item:hover {
+  border-color: var(--accent-soft-strong);
+}
+
+.ai-history-item-books {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 8px;
+  flex-wrap: wrap;
+}
+
+.ai-history-item-book {
+  font-size: 12px;
+  color: var(--ink);
+  background: var(--bg-1);
+  padding: 4px 10px 4px 4px;
+  border-radius: 100px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+}
+
+.ai-history-item-book-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 历史报告里的书本封面缩略图：可点击直达书籍详情，方便一眼认出是哪本书 */
+.ai-history-item-cover {
+  flex-shrink: 0;
+  width: 24px;
+  height: 32px;
+  border-radius: 3px;
+  overflow: hidden;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  background: var(--bg-3);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--ink-faint);
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+
+.ai-history-item-cover:hover {
+  transform: scale(1.08);
+  box-shadow: 0 4px 10px -4px rgba(0, 0, 0, 0.4);
+}
+
+.ai-history-item-cover img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.ai-history-item-date {
+  font-size: 11px;
+  color: var(--ink-faint);
+  margin-bottom: 12px;
+}
+
+.ai-history-item-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.ai-history-item-view {
+  flex: 1;
+  padding: 6px 0;
+  background: var(--accent);
+  color: #fff;
+  border: none;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 600;
+  transition: filter 0.15s ease;
+}
+.ai-history-item-view:hover {
+  filter: brightness(1.08);
+}
+
+.ai-history-item-delete {
+  padding: 6px 12px;
+  background: transparent;
+  color: var(--danger);
+  border: 1px solid var(--danger);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  font-size: 12px;
+  transition: background 0.15s ease;
+}
+.ai-history-item-delete:hover {
+  background: color-mix(in srgb, var(--danger) 12%, transparent);
+}
+
+/* ── AI 伴读：设置弹窗 ──────────────────────────────────────────────────── */
+/* 分段切换控件统一用「书架/标签/平铺」那套胶囊样式：外层满圆角胶囊、
+   内部按钮同样满圆角，选中态用 accent-soft 底 + accent-strong 字，
+   而不是像这里之前那样用页面底色和方形圆角，看起来像另一套设计语言。 */
+.ai-settings-tabs {
+  display: flex;
+  gap: 2px;
+  margin-bottom: 22px;
+  padding: 3px;
+  background: var(--bg-1);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+}
+
+.ai-settings-tab {
+  flex: 1;
+  padding: 8px 0;
+  border: none;
+  background: transparent;
+  color: var(--ink-faint);
+  border-radius: 999px;
+  font-weight: 500;
+  font-size: 13px;
+  cursor: pointer;
+  transition: background 0.2s ease, color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.ai-settings-tab:hover {
+  color: var(--ink);
+}
+
+.ai-settings-tab.active {
+  background: var(--accent-soft);
+  color: var(--accent-strong);
+  font-weight: 600;
+}
+
+.ai-settings-body {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.ai-settings-card {
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  border-radius: var(--radius-lg);
+}
+
+.ai-settings-card-row {
+  display: flex;
+  gap: 16px;
+}
+
+.ai-settings-card-row > .form-group {
+  flex: 1;
+  margin-bottom: 0;
+}
+
+.ai-settings-field {
+  margin-bottom: 0;
+}
+
+.ai-settings-field label {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ink);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.ai-fetch-models-btn {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--accent-strong);
+  background: var(--accent-soft);
+  border: 1px solid transparent;
+  padding: 3px 9px;
+  border-radius: 100px;
+  cursor: pointer;
+  transition: all 0.18s ease;
+}
+
+.ai-fetch-models-btn:hover:not(:disabled) {
+  border-color: var(--accent-soft-strong);
+}
+
+.ai-fetch-models-btn:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.ai-key-configured-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--success);
+  background: color-mix(in srgb, var(--success) 14%, transparent);
+  padding: 2px 8px;
+  border-radius: 100px;
+}
+
+.ai-settings-hint {
+  font-size: 11.5px;
+  color: var(--ink-faint);
+  margin-top: 8px;
+}
+
+.ai-settings-hint-warn {
+  color: color-mix(in srgb, var(--gold, #d9a441) 85%, var(--ink) 15%);
+  background: color-mix(in srgb, var(--gold, #d9a441) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--gold, #d9a441) 30%, transparent);
+  border-radius: var(--radius-sm);
+  padding: 7px 10px;
+}
+
+/* 服务商预设：从纯文字 chip 升级为带色点/推荐角标的卡片网格 */
+.ai-preset-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(112px, 1fr));
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.ai-preset-card {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 9px 10px;
+  background: var(--bg-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--ink-dim);
+  cursor: pointer;
+  text-align: left;
+  min-width: 0;
+  transition: border-color 0.18s ease, color 0.18s ease, background-color 0.18s ease, transform 0.18s ease;
+}
+
+.ai-preset-card:hover {
+  border-color: var(--accent-soft-strong);
+  color: var(--ink);
+  transform: translateY(-1px);
+}
+
+.ai-preset-card.active {
+  border-color: var(--accent);
+  color: var(--accent-strong);
+  background: var(--accent-soft);
+  box-shadow: 0 0 0 1px var(--accent-soft-strong) inset;
+}
+
+.ai-preset-card-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+.ai-preset-card-tag {
+  margin-left: auto;
+  flex-shrink: 0;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--gold-strong);
+  box-shadow: 0 0 0 2px var(--gold-soft);
+}
+
+.ai-preset-dot {
+  flex-shrink: 0;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--accent);
+}
+.ai-preset-dot.provider-siliconflow { background: #ff7a45; }
+.ai-preset-dot.provider-deepseek { background: #5b8cff; }
+.ai-preset-dot.provider-kimi { background: #6f5bff; }
+.ai-preset-dot.provider-qwen { background: #7c5cff; }
+.ai-preset-dot.provider-openai { background: #10b981; }
+.ai-preset-dot.provider-gemini { background: #f4b400; }
+.ai-preset-dot.provider-custom { background: var(--ink-faint); }
+
+/* API Key 输入框的显示/隐藏切换按钮 */
+.ai-key-input-wrap {
+  position: relative;
+}
+
+.ai-key-input-toggle {
+  position: absolute;
+  right: 4px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 30px;
+  height: 30px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  background: transparent;
+  color: var(--ink-faint);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: color 0.15s ease, background-color 0.15s ease;
+}
+
+.ai-key-input-toggle:hover {
+  color: var(--ink);
+  background: var(--bg-3);
+}
+
+.ai-settings-hint a {
+  color: var(--accent-strong);
+  font-weight: 600;
+  margin-left: 4px;
+}
+
+/* 默认模型：常见模型一键选择的小 chip 行 */
+.ai-model-chip-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.ai-model-chip {
+  padding: 5px 11px;
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--ink-dim);
+  background: var(--bg-3);
+  border: 1px solid var(--border);
+  border-radius: 100px;
+  cursor: pointer;
+  transition: all 0.18s ease;
+}
+
+.ai-model-chip:hover {
+  border-color: var(--accent-soft-strong);
+  color: var(--ink);
+}
+
+.ai-model-chip.active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-ink);
+}
+
+/* AI 画像：预设标签多选（替代自由输入） */
+.ai-chip-select {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.ai-chip-option {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 7px 14px;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--ink-dim);
+  background: var(--bg-2);
+  border: 1px solid var(--border-strong);
+  border-radius: 100px;
+  cursor: pointer;
+  transition: all 0.18s ease;
+}
+
+.ai-chip-option:hover {
+  border-color: var(--accent-soft-strong);
+  color: var(--ink);
+}
+
+.ai-chip-option.selected {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-ink);
+}
+
+.ai-chip-option.selected.custom {
+  background: var(--accent-soft);
+  border-color: var(--accent-soft-strong);
+  color: var(--accent-strong);
+}
+
+.ai-chip-option.ai-chip-add {
+  background: transparent;
+  border-style: dashed;
+  color: var(--ink-faint);
+}
+
+.ai-chip-option.ai-chip-add:hover {
+  color: var(--accent-strong);
+  border-color: var(--accent-soft-strong);
+}
+
+.ai-chip-custom-input {
+  width: 130px;
+  padding: 6px 12px;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--ink);
+  background: var(--bg-2);
+  border: 1px solid var(--accent);
+  border-radius: 100px;
+  outline: none;
+}
+
+.ai-test-result {
+  font-size: 12px;
+  margin-top: 8px;
+}
+
+.ai-test-result.error { color: var(--danger); }
+.ai-test-result.success { color: var(--success); }
+.ai-test-result.idle { color: var(--ink-faint); }
+
+.ai-settings-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 12px;
+  margin-top: 26px;
+  padding-top: 16px;
+  border-top: 1px solid var(--border);
 }

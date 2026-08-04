@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
+import { motion, useReducedMotion } from 'framer-motion'
 import { toast } from 'sonner'
+import { chromeSpring } from '../lib/motion'
 import { getDocument, GlobalWorkerOptions, TextLayer } from 'pdfjs-dist'
 import type { PDFDocumentProxy, PDFPageProxy } from 'pdfjs-dist'
 import {
@@ -158,6 +160,7 @@ export default function PdfReaderPage({ book }: Props) {
   const [noteSaveState, setNoteSaveState] = useState<'idle' | 'saving' | 'saved'>('idle')
   const [journalMode, setJournalMode] = useState<'edit' | 'preview'>('edit')
   const [chromeVisible, setChromeVisible] = useState(true)
+  const reduceMotion = useReducedMotion()
   const [selection, setSelection] = useState<PdfSelectionState | null>(null)
   const [basketPage, setBasketPage] = useState('')
   const [projects, setProjects] = useState<CitationProject[]>([])
@@ -206,6 +209,11 @@ export default function PdfReaderPage({ book }: Props) {
     document.addEventListener('fullscreenchange', handler)
     return () => document.removeEventListener('fullscreenchange', handler)
   }, [])
+
+  useEffect(() => {
+    // 退出全屏也必须把顶/底栏找回来，否则会像 EPUB 阅读器一样"栏消失了"
+    setChromeVisible(!isFullscreen)
+  }, [isFullscreen])
 
   useEffect(() => {
     const mq = window.matchMedia('(max-width: 860px)')
@@ -1064,9 +1072,33 @@ export default function PdfReaderPage({ book }: Props) {
   const pdfHighlights = highlights.filter((h) => isPdfLocator(h.cfi_range) || h.page_no)
 
   return (
-    <div className={`reader-shell${chromeVisible ? '' : ' chrome-hidden'}`} ref={shellRef}>
+    <motion.div
+      className={`reader-shell${chromeVisible ? '' : ' chrome-hidden'}`}
+      ref={shellRef}
+      initial={reduceMotion ? false : { opacity: 0, filter: 'none' }}
+      animate={{ opacity: 1, filter: 'none' }}
+      transition={reduceMotion ? { duration: 0 } : { duration: 0.45, ease: [0.16, 1, 0.3, 1] }}
+      onPointerMove={(e) => {
+        if (!isFullscreen || e.pointerType !== 'mouse') return
+        const y = e.clientY
+        const h = window.innerHeight
+        const threshold = 120
+        const shouldShow = y < threshold || y > h - threshold
+        if (shouldShow && !chromeVisible) {
+          setChromeVisible(true)
+        } else if (!shouldShow && chromeVisible && !drawerTab) {
+          setChromeVisible(false)
+        }
+      }}
+    >
       <ReaderReturnOriginBar visible={canNavBack} onReturn={goNavBack} onDismiss={clearNavOrigin} />
-      <div className="reader-topbar">
+      <motion.div
+        className="reader-topbar"
+        initial={false}
+        animate={chromeVisible ? { y: 0, opacity: 1 } : { y: '-105%', opacity: 0 }}
+        transition={reduceMotion ? { duration: 0 } : chromeSpring}
+        style={{ pointerEvents: chromeVisible ? 'auto' : 'none' }}
+      >
         <div className="reader-topbar-left">
           <button className="icon-btn" onClick={() => navigate(-1)} title="返回" aria-label="返回">
             <ArrowLeft size={18} />
@@ -1129,7 +1161,7 @@ export default function PdfReaderPage({ book }: Props) {
             <NotebookPen size={18} />
           </button>
         </div>
-      </div>
+      </motion.div>
 
       <div className="reader-body">
         <div className="reader-viewport pdf-viewport" ref={containerRef} onClick={onViewportClick}>
@@ -1377,7 +1409,14 @@ export default function PdfReaderPage({ book }: Props) {
         )}
       </div>
 
-      <div className="reader-bottombar" onMouseDown={(e) => e.stopPropagation()}>
+      <motion.div
+        className="reader-bottombar"
+        onMouseDown={(e) => e.stopPropagation()}
+        initial={false}
+        animate={chromeVisible ? { y: 0, opacity: 1 } : { y: '105%', opacity: 0 }}
+        transition={reduceMotion ? { duration: 0 } : chromeSpring}
+        style={{ pointerEvents: chromeVisible ? 'auto' : 'none' }}
+      >
         <input
           className="reader-scrubber"
           type="range"
@@ -1406,7 +1445,7 @@ export default function PdfReaderPage({ book }: Props) {
             <ChevronRight size={18} />
           </button>
         </div>
-      </div>
-    </div>
+      </motion.div>
+    </motion.div>
   )
 }

@@ -6,9 +6,6 @@ MVP 采用数据库 ILIKE 检索（SQLAlchemy 在 SQLite / PostgreSQL 下都能�
 tsvector GIN 索引或 SQLite FTS5 虚表，无需改动上层 API。
 """
 
-import re
-from typing import Optional
-
 from sqlalchemy import or_
 from sqlalchemy.orm import Session
 

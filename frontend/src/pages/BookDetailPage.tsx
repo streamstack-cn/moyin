@@ -2,9 +2,12 @@ import { useEffect, useRef, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { toast } from 'sonner'
 import { BookOpenText, Download, Edit3, FolderInput, ImageUp, Search, Star, Trash2, Wand2 } from 'lucide-react'
+import { motion } from 'framer-motion'
 import { api, ApiError, downloadUrl } from '../api/client'
 import type { BookDetail, Library, MetadataCandidate, MetadataSearchResponse } from '../api/types'
 import Modal from '../components/Modal'
+import CoverTilt from '../components/CoverTilt'
+import { staggerContainer, staggerItem } from '../lib/motion'
 import { useAuth } from '../contexts/AuthContext'
 import { formatBadgeClass, formatLabel } from '../lib/bookFormat'
 
@@ -24,6 +27,7 @@ export default function BookDetailPage() {
   const [movingLibrary, setMovingLibrary] = useState(false)
   const [deleting, setDeleting] = useState(false)
   const [uploadingCover, setUploadingCover] = useState(false)
+  const [catalogExpanded, setCatalogExpanded] = useState(false)
   const coverInputRef = useRef<HTMLInputElement>(null)
 
   async function load() {
@@ -105,117 +109,128 @@ export default function BookDetailPage() {
       <div className="topbar">
         <div className="page-title">书籍详情</div>
       </div>
-      <div className="page-content">
+      <motion.div className="page-content" variants={staggerContainer} initial="initial" animate="animate">
         <div className="book-detail">
-          <div className="book-detail-aside">
-            <div className="book-cover book-detail-cover">
+          <motion.div className="book-detail-aside" variants={staggerItem}>
+            <CoverTilt className="book-cover book-detail-cover">
               {book.cover_url ? (
                 <img src={book.cover_url} alt={book.title} />
               ) : (
                 <div className="book-cover-placeholder">{book.title}</div>
               )}
-            </div>
+            </CoverTilt>
             <div className="book-detail-actions">
-              {book.readable ? (
-                book.reading_percent > 0 ||
-                book.reading_status === 'reading' ||
-                book.reading_status === 'finished' ? (
-                  <>
+              <div className="book-detail-actions-primary">
+                {book.readable ? (
+                  book.reading_percent > 0 ||
+                  book.reading_status === 'reading' ||
+                  book.reading_status === 'finished' ? (
+                    <>
+                      <button className="btn btn-primary" onClick={() => navigate(`/read/${book.id}`)}>
+                        <BookOpenText size={16} />
+                        继续阅读{book.reading_percent > 0 ? ` · ${book.reading_percent}%` : ''}
+                      </button>
+                      <button className="btn" onClick={() => navigate(`/read/${book.id}?restart=1`)}>
+                        重新阅读
+                      </button>
+                    </>
+                  ) : (
                     <button className="btn btn-primary" onClick={() => navigate(`/read/${book.id}`)}>
                       <BookOpenText size={16} />
-                      继续阅读{book.reading_percent > 0 ? ` · ${book.reading_percent}%` : ''}
+                      开始阅读
                     </button>
-                    <button className="btn" onClick={() => navigate(`/read/${book.id}?restart=1`)}>
-                      重新阅读
-                    </button>
-                  </>
+                  )
                 ) : (
-                  <button className="btn btn-primary" onClick={() => navigate(`/read/${book.id}`)}>
-                    <BookOpenText size={16} />
-                    开始阅读
-                  </button>
-                )
-              ) : (
-                <div className="badge badge-muted">该格式暂不支持在线阅读</div>
-              )}
-              <a className="btn" href={downloadUrl(`/api/books/${book.id}/file`)} target="_blank" rel="noreferrer">
-                <Download size={16} />
-                下载原文件
-              </a>
-              <button
-                className="btn"
-                onClick={async () => {
-                  try {
-                    const res = await api.post<{ is_favorite: boolean }>(`/api/books/${book.id}/favorite`)
-                    setBook((prev) => (prev ? { ...prev, is_favorite: res.is_favorite } : prev))
-                    toast.success(res.is_favorite ? '已加入收藏' : '已取消收藏')
-                  } catch (err) {
-                    toast.error(err instanceof ApiError ? err.message : '操作失败')
-                  }
-                }}
-              >
-                <Star size={16} fill={book.is_favorite ? 'currentColor' : 'none'} />
-                {book.is_favorite ? '取消收藏' : '收藏'}
-              </button>
+                  <div className="badge badge-muted">该格式暂不支持在线阅读</div>
+                )}
+              </div>
+
+              <div className="book-detail-actions-row">
+                <a className="btn" href={downloadUrl(`/api/books/${book.id}/file`)} target="_blank" rel="noreferrer">
+                  <Download size={16} />
+                  下载
+                </a>
+                <button
+                  className={`btn${book.is_favorite ? ' book-detail-fav-on' : ''}`}
+                  onClick={async () => {
+                    try {
+                      const res = await api.post<{ is_favorite: boolean }>(`/api/books/${book.id}/favorite`)
+                      setBook((prev) => (prev ? { ...prev, is_favorite: res.is_favorite } : prev))
+                      toast.success(res.is_favorite ? '已加入收藏' : '已取消收藏')
+                    } catch (err) {
+                      toast.error(err instanceof ApiError ? err.message : '操作失败')
+                    }
+                  }}
+                >
+                  <Star size={16} fill={book.is_favorite ? 'currentColor' : 'none'} />
+                  {book.is_favorite ? '已收藏' : '收藏'}
+                </button>
+              </div>
+
               {user?.role === 'admin' && (
                 <>
-                  <button className="btn" onClick={() => setShowMatch(true)}>
-                    <Wand2 size={16} />
-                    匹配豆瓣 / Google 元数据
-                  </button>
-                  <button className="btn" onClick={() => setShowEdit(true)}>
-                    <Edit3 size={16} />
-                    手动编辑信息
-                  </button>
-                  <button
-                    className="btn"
-                    onClick={async () => {
-                      try {
-                        const libs = await api.get<Library[]>('/api/libraries')
-                        setLibraries(libs)
-                        setMoveLibraryId(book.library_id || '__none__')
-                        setShowMoveLibrary(true)
-                      } catch (err) {
-                        toast.error(err instanceof ApiError ? err.message : '加载书架失败')
-                      }
-                    }}
-                  >
-                    <FolderInput size={16} />
-                    转移书架
-                  </button>
-                  <button className="btn" onClick={() => coverInputRef.current?.click()} disabled={uploadingCover}>
-                    <ImageUp size={16} />
-                    {uploadingCover ? '上传中…' : '更换封面'}
-                  </button>
-                  <input
-                    ref={coverInputRef}
-                    type="file"
-                    accept="image/*"
-                    style={{ display: 'none' }}
-                    onChange={(e) => {
-                      const file = e.target.files?.[0]
-                      if (file) uploadCover(file)
-                      e.target.value = ''
-                    }}
-                  />
-                  <button className="btn btn-danger" onClick={() => setShowDelete(true)}>
+                  <div className="book-detail-actions-label">管理操作</div>
+                  <div className="book-detail-actions-admin">
+                    <button className="btn" title="匹配豆瓣 / Google 元数据" onClick={() => setShowMatch(true)}>
+                      <Wand2 size={15} />
+                      匹配元数据
+                    </button>
+                    <button className="btn" onClick={() => setShowEdit(true)}>
+                      <Edit3 size={15} />
+                      编辑信息
+                    </button>
+                    <button
+                      className="btn"
+                      onClick={async () => {
+                        try {
+                          const libs = await api.get<Library[]>('/api/libraries')
+                          setLibraries(libs)
+                          setMoveLibraryId(book.library_id || '__none__')
+                          setShowMoveLibrary(true)
+                        } catch (err) {
+                          toast.error(err instanceof ApiError ? err.message : '加载书架失败')
+                        }
+                      }}
+                    >
+                      <FolderInput size={15} />
+                      转移书架
+                    </button>
+                    <button className="btn" onClick={() => coverInputRef.current?.click()} disabled={uploadingCover}>
+                      <ImageUp size={15} />
+                      {uploadingCover ? '上传中…' : '换封面'}
+                    </button>
+                    <input
+                      ref={coverInputRef}
+                      type="file"
+                      accept="image/*"
+                      style={{ display: 'none' }}
+                      onChange={(e) => {
+                        const file = e.target.files?.[0]
+                        if (file) uploadCover(file)
+                        e.target.value = ''
+                      }}
+                    />
+                  </div>
+                  <button className="btn btn-danger book-detail-actions-danger" onClick={() => setShowDelete(true)}>
                     <Trash2 size={16} />
                     删除书籍
                   </button>
                 </>
               )}
             </div>
-          </div>
+          </motion.div>
 
           <div className="book-detail-main">
-            <h1 className="book-detail-title">{book.title}</h1>
-            {book.subtitle && <div className="book-detail-subtitle">{book.subtitle}</div>}
-            <div className="book-detail-authors">
-              {book.authors.join('、') || '佚名'}
-              {book.translator && ` · ${book.translator} 译`}
-            </div>
+            <motion.div variants={staggerItem}>
+              <h1 className="book-detail-title">{book.title}</h1>
+              {book.subtitle && <div className="book-detail-subtitle">{book.subtitle}</div>}
+              <div className="book-detail-authors">
+                {book.authors.join('、') || '佚名'}
+                {book.translator && ` · ${book.translator} 译`}
+              </div>
+            </motion.div>
 
-            <div className="book-detail-badges">
+            <motion.div className="book-detail-badges" variants={staggerItem}>
               <span className={formatBadgeClass(book.file_format)}>{formatLabel(book.file_format)}</span>
               {book.metadata_source && <span className="badge badge-muted">来源：{book.metadata_source}</span>}
               {book.tags.map((t) => (
@@ -223,9 +238,9 @@ export default function BookDetailPage() {
                   {t}
                 </span>
               ))}
-            </div>
+            </motion.div>
 
-            <div className="card card-pad book-detail-meta">
+            <motion.div className="card card-pad book-detail-meta" variants={staggerItem}>
               <InfoRow label="书架" value={book.library_name || '未归架'} />
               <InfoRow label="出版社" value={book.publisher} />
               <InfoRow label="出品方" value={book.producer} />
@@ -238,24 +253,38 @@ export default function BookDetailPage() {
               <InfoRow label="定价" value={book.price} />
               <InfoRow label="原作名" value={book.original_title} />
               <InfoRow label="语言" value={book.language} />
-            </div>
+            </motion.div>
 
             {book.description && (
-              <div className="card card-pad book-detail-section">
+              <motion.div className="card card-pad book-detail-section" variants={staggerItem}>
                 <div className="book-detail-section-title">内容简介</div>
                 <div className="book-detail-desc">{book.description}</div>
-              </div>
+              </motion.div>
             )}
 
             {book.catalog && (
-              <div className="card card-pad book-detail-section">
+              <motion.div className="card card-pad book-detail-section" variants={staggerItem}>
                 <div className="book-detail-section-title">目录</div>
-                <pre className="book-detail-catalog">{book.catalog}</pre>
-              </div>
+                <div className={`book-detail-catalog-wrap${catalogExpanded ? ' expanded' : ''}`}>
+                  <pre className="book-detail-catalog">{book.catalog}</pre>
+                  {!catalogExpanded && book.catalog.split('\n').length > 10 && (
+                    <div className="book-detail-catalog-fade" aria-hidden />
+                  )}
+                </div>
+                {book.catalog.split('\n').length > 10 && (
+                  <button
+                    type="button"
+                    className="btn btn-sm book-detail-catalog-toggle"
+                    onClick={() => setCatalogExpanded((v) => !v)}
+                  >
+                    {catalogExpanded ? '收起目录' : '展开完整目录'}
+                  </button>
+                )}
+              </motion.div>
             )}
           </div>
         </div>
-      </div>
+      </motion.div>
 
       {showEdit && (
         <EditModal book={book} onClose={() => setShowEdit(false)} onSaved={() => { setShowEdit(false); load() }} />

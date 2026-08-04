@@ -111,6 +111,16 @@ export interface HomeFeed {
   recent_snippets?: HomeSnippet[]
 }
 
+export interface DailyQuote {
+  id: string
+  book_id: string
+  book_title: string
+  book_format: string
+  quoted_text: string
+  cfi_range: string
+  page_no: string
+}
+
 export interface GlobalSearchBookHit {
   id: string
   title: string
@@ -166,6 +176,7 @@ export interface Tag {
   name: string
   source: string
   book_count: number
+  order_index?: number
 }
 
 export interface Collection {
@@ -174,6 +185,7 @@ export interface Collection {
   is_smart: boolean
   smart_query: string
   book_count: number
+  order_index?: number
 }
 
 export interface Library {
@@ -183,6 +195,7 @@ export interface Library {
   scan_mode: string
   last_scanned_at: string | null
   book_count: number
+  order_index?: number
 }
 
 export interface BrowseEntry {
@@ -248,3 +261,95 @@ export interface MetadataSearchResponse {
   /** api = 官方相关度顺序，未做本地打分 */
   google_ranking?: 'api' | string
 }
+
+// ── AI 伴读 ────────────────────────────────────────────────────────────────
+
+export interface AiProvider {
+  key: string
+  name: string
+  base_url: string
+  has_balance: boolean
+  recommended: boolean
+  signup_url: string
+  models: string[]
+}
+
+export interface AiConfig {
+  has_key: boolean
+  base_url: string
+  api_key_masked: string
+  api_key?: string
+  model: string
+  output_lang: string
+  output_length: string
+  ai_portrait: AiPortrait
+  provider: string
+}
+
+export interface AiPortrait {
+  reading_style: string
+  output_tone: string
+  focus_areas: string[]
+  extra_prompt: string
+}
+
+export interface AiReaderBook {
+  id: string
+  title: string
+  authors: string[]
+  cover_url: string
+  file_format: string
+  reading_status: 'unread' | 'reading' | 'finished'
+  highlight_count: number
+  has_note: boolean
+  citation_count: number
+}
+
+
+export interface AiHighlight {
+  id?: string
+  text: string
+  note: string
+  chapter: string
+}
+
+export interface AiCitation {
+  id?: string
+  text: string
+  group: string
+}
+
+export interface AiMaterial {
+  id: string
+  title: string
+  authors: string[]
+  cover_url: string
+  file_format: string
+  highlights: AiHighlight[]
+  note_content: string
+  note_id?: string
+  citations: AiCitation[]
+  has_full_text_index: boolean
+  used_full_text: boolean
+  full_text_chapters: { index: number; title: string; text: string }[]
+}
+
+export interface AiReportContent {
+  raw?: string
+  content_summary?: string
+  core_insights?: string
+  personal_reflections?: string
+  knowledge_map?: string
+  reading_advice?: string
+  similar_books?: Array<{ title: string, author?: string, reason: string }>
+  quotable_passages?: Array<{ text: string, context?: string }>
+  book_summary_for_citation?: string
+}
+
+export interface AiReport {
+  id: string
+  book_ids: string[]
+  report: AiReportContent
+  generated_at: string
+}
+

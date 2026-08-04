@@ -11,7 +11,7 @@ citation_service.py — 引用规则引擎
 
 import json
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Optional
 
 from services import opencc_service, stroke_table

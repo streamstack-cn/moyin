@@ -54,6 +54,7 @@ class Library(Base):
     name = Column(String(128), nullable=False)
     root_path = Column(String(512), nullable=False)
     scan_mode = Column(String(16), default="manual")  # manual / watch
+    order_index = Column(Integer, default=0)  # 书架自定义排序（拖拽调整）
     created_at = Column(DateTime, default=datetime.utcnow)
     last_scanned_at = Column(DateTime, nullable=True)
 
@@ -259,3 +260,32 @@ class AppConfig(Base):
 
     key = Column(String(64), primary_key=True)
     value = Column(Text, default="")
+
+
+# ── AI 伴读：用户独立 AI 配置 ────────────────────────────────────────────
+class UserAiConfig(Base):
+    """每位用户独立的 AI 服务配置，互相隔离，管理员不可跨用户查看。"""
+    __tablename__ = "user_ai_configs"
+
+    user_id = Column(String(32), ForeignKey("users.id", ondelete="CASCADE"), primary_key=True)
+    base_url = Column(Text, default="https://api.siliconflow.cn/v1")
+    api_key = Column(Text, default="")   # 明文存储，本地 SQLite 用户数据
+    model = Column(String(128), default="Qwen/Qwen3-8B")
+    # 用户 AI 画像（JSON）：阅读风格、关注领域、输出语气、自定义要求
+    ai_portrait = Column(Text, default="{}")
+    output_lang = Column(String(8), default="zh")       # zh / zh-tw
+    output_length = Column(String(16), default="standard")  # concise / standard / detailed
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+# ── AI 伴读：报告缓存 ──────────────────────────────────────────────────────
+class AiReadingReport(Base):
+    """AI 伴读报告，按用户 + 书目组合存储，支持多书联读。"""
+    __tablename__ = "ai_reading_reports"
+
+    id = Column(String(32), primary_key=True, default=gen_id)
+    user_id = Column(String(32), ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    book_ids = Column(Text, default="[]")       # JSON 数组，如 ["id1","id2"]
+    book_ids_hash = Column(String(64), index=True)   # SHA256(sorted book_ids) 快速查重
+    report_json = Column(Text, default="{}")     # 6 大模块的结构化内容
+    generated_at = Column(DateTime, default=datetime.utcnow)

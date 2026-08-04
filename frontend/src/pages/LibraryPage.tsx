@@ -7,6 +7,7 @@ import {
   ChevronRight,
   Edit3,
   FolderPlus,
+  GripVertical,
   LayoutGrid,
   Layers,
   Loader2,
@@ -20,10 +21,14 @@ import {
 } from 'lucide-react'
 import { api, ApiError } from '../api/client'
 import type { BookSummary, BrowseResult, Library, Tag } from '../api/types'
+import AnimatedNumber from '../components/AnimatedNumber'
 import BookCard from '../components/BookCard'
 import ConfirmDialog from '../components/ConfirmDialog'
 import Modal from '../components/Modal'
+import MotionGrid from '../components/MotionGrid'
 import { useAuth } from '../contexts/AuthContext'
+import { trackGlow } from '../lib/glowTrack'
+import { useRowCapacity } from '../lib/useRowCapacity'
 
 interface Stats {
   total_books: number
@@ -34,9 +39,23 @@ interface Stats {
   total_citations: number
   missing_douban?: number
   favorites?: number
+  top_rated?: number
 }
 
 type GroupMode = 'shelf' | 'tag' | 'flat'
+type SortMode = 'added_desc' | 'added_asc' | 'rating_desc' | 'title'
+
+const SORT_KEY = 'moyin_library_sort'
+
+function loadSort(): SortMode {
+  try {
+    const v = localStorage.getItem(SORT_KEY)
+    if (v === 'added_desc' || v === 'added_asc' || v === 'rating_desc' || v === 'title') return v
+  } catch {
+    /* private mode */
+  }
+  return 'added_desc'
+}
 
 interface BookSection {
   key: string
@@ -105,6 +124,15 @@ function loadGroupMode(): GroupMode {
   return 'shelf'
 }
 
+/**
+ * 书库页每次切换过来都要经历「空白 → 转圈 → 内容」，观感上像是「刷新了一下」——
+ * 因为路由切换会把 LibraryPage 整个卸载重挂载，组件内 state 全部归零，
+ * 再重新发一轮请求。这里用一个模块级缓存（随 JS 模块常驻，不随组件卸载丢失）
+ * 保存上一次成功拿到的数据，下次挂载时先用缓存直接把内容摆出来，
+ * 同时在背后静默刷新一次，体验上跟首页等常驻数据的页面一致。
+ */
+let libraryCache: { books: BookSummary[]; tags: Tag[]; libraries: Library[]; stats: Stats | null } | null = null
+
 function loadCollapsed(): Record<string, boolean> {
   try {
     const raw = localStorage.getItem(COLLAPSED_KEY)
@@ -120,16 +148,18 @@ export default function LibraryPage() {
   const { user } = useAuth()
   const navigate = useNavigate()
   const [searchParams] = useSearchParams()
-  const [books, setBooks] = useState<BookSummary[]>([])
-  const [tags, setTags] = useState<Tag[]>([])
-  const [libraries, setLibraries] = useState<Library[]>([])
-  const [stats, setStats] = useState<Stats | null>(null)
+  const [books, setBooks] = useState<BookSummary[]>(() => libraryCache?.books ?? [])
+  const [tags, setTags] = useState<Tag[]>(() => libraryCache?.tags ?? [])
+  const [libraries, setLibraries] = useState<Library[]>(() => libraryCache?.libraries ?? [])
+  const [stats, setStats] = useState<Stats | null>(() => libraryCache?.stats ?? null)
   const [q, setQ] = useState('')
   const [activeTag, setActiveTag] = useState<string | null>(null)
   const [activeLibrary, setActiveLibrary] = useState<string | null>(null)
   const [status, setStatus] = useState(() => searchParams.get('status') || '')
   const metaFilter = searchParams.get('meta') || ''
-  const [loading, setLoading] = useState(true)
+  // 有缓存的话直接展示缓存内容，不再从「转圈」状态开始
+  const [loading, setLoading] = useState(() => libraryCache === null)
+  const isFirstRunRef = useRef(true)
   const [showLibraryModal, setShowLibraryModal] = useState(false)
   const [showUploadModal, setShowUploadModal] = useState(false)
   const [uploadFile, setUploadFile] = useState<File | null>(null)
@@ -139,6 +169,7 @@ export default function LibraryPage() {
   const [scanBusy, setScanBusy] = useState(false)
   const [stoppingScan, setStoppingScan] = useState(false)
   const [groupMode, setGroupMode] = useState<GroupMode>(loadGroupMode)
+  const [sortMode, setSortMode] = useState<SortMode>(loadSort)
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>(loadCollapsed)
   const [selectedIds, setSelectedIds] = useState<Set<string>>(() =>
     searchParams.get('meta') === 'missing_douban' ? loadBatchSelection() : new Set(),
@@ -162,12 +193,18 @@ export default function LibraryPage() {
       if (activeTag) params.set('tag', activeTag)
       if (status) params.set('status', status)
       if (metaFilter) params.set('meta', metaFilter)
+      params.set('sort', sortMode)
       const [b, t] = await Promise.all([
         api.get<BookSummary[]>(`/api/books?${params.toString()}`),
         api.get<Tag[]>('/api/tags'),
       ])
+      const sortedTags = t.sort((a, b) => (a.order_index || 0) - (b.order_index || 0))
       setBooks(b)
-      setTags(t)
+      setTags(sortedTags)
+      // 只在「无筛选的默认视图」下写入缓存，避免下次进页面直接展示某次筛选后的结果
+      if (!q && !activeTag && !status && !metaFilter) {
+        libraryCache = { books: b, tags: sortedTags, libraries: libraryCache?.libraries ?? [], stats: libraryCache?.stats ?? null }
+      }
     } catch (err) {
       if (!opts?.silent) toast.error(err instanceof ApiError ? err.message : '加载书库失败')
     } finally {
@@ -191,7 +228,7 @@ export default function LibraryPage() {
       try {
         const status = await api.get<{ busy: boolean }>('/api/libraries/scan/status')
         const libs = await api.get<Library[]>('/api/libraries')
-        setLibraries(libs)
+        setLibraries(libs.sort((a, b) => (a.order_index || 0) - (b.order_index || 0)))
         setScanBusy(Boolean(status.busy))
         if (!status.busy || tries >= 180) {
           clearSoftWatch()
@@ -211,7 +248,7 @@ export default function LibraryPage() {
     setScanningAll(true)
     try {
       const libs = await api.get<Library[]>('/api/libraries')
-      setLibraries(libs)
+      setLibraries(libs.sort((a, b) => (a.order_index || 0) - (b.order_index || 0)))
       if (libs.length === 0) {
         toast.error('还没有书库目录，请先添加')
         return
@@ -236,7 +273,7 @@ export default function LibraryPage() {
       setScanBusy(false)
       toast.success('已请求停止扫描（排队已清空；当前文件处理完即停）')
       await refresh({ silent: true })
-      api.get<Library[]>('/api/libraries').then(setLibraries).catch(() => {})
+      api.get<Library[]>('/api/libraries').then(libs => setLibraries(libs.sort((a, b) => (a.order_index || 0) - (b.order_index || 0)))).catch(() => {})
     } catch (err) {
       toast.error(err instanceof ApiError ? err.message : '停止失败')
     } finally {
@@ -499,11 +536,22 @@ export default function LibraryPage() {
   }
 
   useEffect(() => {
-    refresh()
-    api.get<Stats>('/api/admin/stats').then(setStats).catch(() => {})
-    api.get<Library[]>('/api/libraries').then(setLibraries).catch(() => {})
+    // 只有「首次挂载 + 已经有缓存可以先展示」时才静默刷新；
+    // 用户在页面里主动切筛选/排序，还是应该走原来的转圈反馈，不受缓存影响
+    const silent = isFirstRunRef.current && libraryCache !== null
+    isFirstRunRef.current = false
+    refresh({ silent })
+    api.get<Stats>('/api/admin/stats').then((s) => {
+      setStats(s)
+      if (libraryCache) libraryCache.stats = s
+    }).catch(() => {})
+    api.get<Library[]>('/api/libraries').then(libs => {
+      const sorted = libs.sort((a, b) => (a.order_index || 0) - (b.order_index || 0))
+      setLibraries(sorted)
+      if (libraryCache) libraryCache.libraries = sorted
+    }).catch(() => {})
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [q, activeTag, status, metaFilter])
+  }, [q, activeTag, status, metaFilter, sortMode])
 
   // 移动端不提供标签筛选；若仍停留在「按标签」视图则退回书架
   useEffect(() => {
@@ -553,6 +601,14 @@ export default function LibraryPage() {
 
   useEffect(() => {
     try {
+      localStorage.setItem(SORT_KEY, sortMode)
+    } catch {
+      /* private mode */
+    }
+  }, [sortMode])
+
+  useEffect(() => {
+    try {
       localStorage.setItem(COLLAPSED_KEY, JSON.stringify(collapsed))
     } catch {
       /* private mode */
@@ -580,6 +636,18 @@ export default function LibraryPage() {
   const effectiveGroupMode: GroupMode =
     metaFilter === 'missing_douban' || metaFilter === 'favorited' ? 'flat' : groupMode
 
+  // 高分推荐：书籍内容区首行，有豆瓣评分的书按评分从高到低排列（不限阅读状态），
+  // 只在「纯浏览」场景（无搜索/筛选）展示，行内数量随容器宽度自适应
+  const [recommendedCapacity, recommendedRowRef] = useRowCapacity({ minItemWidth: 158, gap: 22, min: 3, max: 16 })
+  const recommendedBooks = useMemo(() => {
+    return books
+      .filter((b) => (b.rating || 0) > 0)
+      .sort((a, b) => (b.rating || 0) - (a.rating || 0))
+  }, [books])
+  const showRecommended =
+    !loading && !metaFilter && !q && !activeTag && !activeLibrary && !status && recommendedBooks.length > 0
+  const visibleRecommended = recommendedBooks.slice(0, recommendedCapacity)
+
   function toggleSection(key: string) {
     setCollapsed((prev) => ({ ...prev, [key]: !prev[key] }))
   }
@@ -588,7 +656,7 @@ export default function LibraryPage() {
     <>
       <div className="topbar library-topbar">
         <div className="library-topbar-heading">
-          <div className="page-title">我的书库</div>
+          <div className="page-title text-gradient-accent">我的书库</div>
           <div className="page-subtitle">按书架与标签浏览 · 标注 · 沉淀写作引用</div>
         </div>
         <div className="library-topbar-actions">
@@ -754,19 +822,27 @@ export default function LibraryPage() {
         <div className="stat-strip" aria-label="书库概览">
           <span className="stat-strip-item">
             <span className="stat-strip-label">馆藏</span>
-            <span className="stat-strip-value">{stats?.total_books ?? '—'}</span>
+            <span className="stat-strip-value">
+              <AnimatedNumber value={stats?.total_books} />
+            </span>
           </span>
           <span className="stat-strip-item">
             <span className="stat-strip-label">在读</span>
-            <span className="stat-strip-value">{stats?.reading ?? '—'}</span>
+            <span className="stat-strip-value">
+              <AnimatedNumber value={stats?.reading} />
+            </span>
           </span>
           <span className="stat-strip-item">
             <span className="stat-strip-label">本月读完</span>
-            <span className="stat-strip-value">{stats?.finished_this_month ?? '—'}</span>
+            <span className="stat-strip-value">
+              <AnimatedNumber value={stats?.finished_this_month} />
+            </span>
           </span>
           <span className="stat-strip-item">
             <span className="stat-strip-label">高亮</span>
-            <span className="stat-strip-value">{stats?.total_highlights ?? '—'}</span>
+            <span className="stat-strip-value">
+              <AnimatedNumber value={stats?.total_highlights} />
+            </span>
           </span>
           <button
             type="button"
@@ -775,7 +851,9 @@ export default function LibraryPage() {
             title="查看我收藏的书（特别好的 / 待看）"
           >
             <span className="stat-strip-label">收藏</span>
-            <span className="stat-strip-value">{stats?.favorites ?? '—'}</span>
+            <span className="stat-strip-value">
+              <AnimatedNumber value={stats?.favorites} />
+            </span>
           </button>
           <button
             type="button"
@@ -784,7 +862,9 @@ export default function LibraryPage() {
             title="查看缺少信息的书，点开可手动编辑或匹配豆瓣"
           >
             <span className="stat-strip-label">缺少信息</span>
-            <span className="stat-strip-value">{stats?.missing_douban ?? '—'}</span>
+            <span className="stat-strip-value">
+              <AnimatedNumber value={stats?.missing_douban} />
+            </span>
           </button>
         </div>
 
@@ -864,7 +944,7 @@ export default function LibraryPage() {
         )}
 
         <div className="toolbar library-toolbar">
-          <div className="search-box">
+          <div className="search-box" onMouseMove={trackGlow}>
             <Search size={16} />
             <input className="input" placeholder="按书名 / 作者 / ISBN 搜索…" value={q} onChange={(e) => setQ(e.target.value)} />
           </div>
@@ -873,6 +953,18 @@ export default function LibraryPage() {
             <option value="unread">未读</option>
             <option value="reading">在读</option>
             <option value="finished">已读完</option>
+          </select>
+          <select
+            className="input"
+            style={{ width: 150 }}
+            value={sortMode}
+            title="排序方式（书架 / 平铺均生效）"
+            onChange={(e) => setSortMode(e.target.value as SortMode)}
+          >
+            <option value="added_desc">最新入库</option>
+            <option value="added_asc">最早入库</option>
+            <option value="rating_desc">评分从高到低</option>
+            <option value="title">书名 A-Z</option>
           </select>
           <div className="library-view-switch" role="group" aria-label="排版方式">
             <button
@@ -951,9 +1043,28 @@ export default function LibraryPage() {
           </div>
         )}
 
+        {showRecommended && (
+          <section className="home-section library-recommend-section">
+            <div className="home-section-header">
+              <div className="home-section-title library-recommend-title">高分推荐</div>
+            </div>
+            <MotionGrid className="book-grid book-grid-row" dense mount ref={recommendedRowRef}>
+              {visibleRecommended.map((b) => (
+                <BookCard key={`toprated-${b.id}`} book={b} onFavoriteChange={onFavoriteChange} />
+              ))}
+            </MotionGrid>
+          </section>
+        )}
+
         {loading ? (
-          <div className="empty-state">
-            <div className="spinner" />
+          <div className="book-grid" aria-busy="true" aria-label="加载中">
+            {Array.from({ length: 12 }).map((_, i) => (
+              <div key={i} className="skeleton-book-card">
+                <div className="skeleton-loader skeleton-book-cover" />
+                <div className="skeleton-loader skeleton-line" style={{ width: '84%' }} />
+                <div className="skeleton-loader skeleton-line" style={{ width: '54%' }} />
+              </div>
+            ))}
           </div>
         ) : emptyHint ? (
           <div className="empty-state">
@@ -963,7 +1074,7 @@ export default function LibraryPage() {
         ) : effectiveGroupMode === 'flat' ? (
           <div className="library-section flat">
             <div className="library-shelf-rail" aria-hidden />
-            <div className="book-grid">
+            <MotionGrid className="book-grid">
               {filteredBooks.map((b) => (
                 <BookCard
                   key={b.id}
@@ -974,7 +1085,7 @@ export default function LibraryPage() {
                   onToggleSelect={toggleSelect}
                 />
               ))}
-            </div>
+            </MotionGrid>
           </div>
         ) : (
           <div className="library-sections">
@@ -998,7 +1109,7 @@ export default function LibraryPage() {
                   {!isCollapsed && (
                     <>
                       <div className="library-shelf-rail" aria-hidden />
-                      <div className="book-grid">
+                      <MotionGrid className="book-grid">
                         {section.books.map((b) => (
                           <BookCard
                             key={`${section.key}-${b.id}`}
@@ -1009,7 +1120,7 @@ export default function LibraryPage() {
                             onToggleSelect={toggleSelect}
                           />
                         ))}
-                      </div>
+                      </MotionGrid>
                     </>
                   )}
                 </section>
@@ -1064,7 +1175,7 @@ export default function LibraryPage() {
           libraries={libraries}
           onClose={() => setShowLibraryModal(false)}
           onChanged={(opts) => {
-            api.get<Library[]>('/api/libraries').then(setLibraries).catch(() => {})
+            api.get<Library[]>('/api/libraries').then(libs => setLibraries(libs.sort((a, b) => (a.order_index || 0) - (b.order_index || 0)))).catch(() => {})
             void refresh({ silent: opts?.silent })
           }}
         />
@@ -1203,14 +1314,13 @@ function buildBookSections(
       }
     }
     const sections: BookSection[] = []
-    // 有映射名的书架按名称排；保留 libraries 原有顺序更贴近管理习惯
-    for (const lib of libraries) {
+    const sortedLibraries = [...libraries].sort((a, b) => (a.order_index || 0) - (b.order_index || 0))
+    for (const lib of sortedLibraries) {
       const list = byLib.get(lib.id)
       if (!list?.length) continue
       sections.push({
         key: `shelf:${lib.id}`,
         title: lib.name,
-        hint: lib.root_path,
         books: list,
       })
     }
@@ -1292,6 +1402,43 @@ function LibraryModal({
   const [pendingDelete, setPendingDelete] = useState<Library | null>(null)
   const [deletingLibrary, setDeletingLibrary] = useState(false)
   const watchingCount = libraries.filter((l) => l.scan_mode === 'watch').length
+
+  // 书架排序：拖拽把手改变书架显示顺序（影响「按书架」分组视图与筛选栏顺序）
+  const [orderedLibs, setOrderedLibs] = useState<Library[]>(libraries)
+  const [dragIndex, setDragIndex] = useState<number | null>(null)
+  const [dragOverIndex, setDragOverIndex] = useState<number | null>(null)
+  const [savingOrder, setSavingOrder] = useState(false)
+  useEffect(() => {
+    setOrderedLibs(libraries)
+  }, [libraries])
+
+  async function commitOrder(next: Library[]) {
+    setOrderedLibs(next)
+    setSavingOrder(true)
+    try {
+      await api.put('/api/libraries/reorder', { library_ids: next.map((l) => l.id) })
+      onChanged({ silent: true })
+    } catch (err) {
+      toast.error(err instanceof ApiError ? err.message : '排序保存失败')
+      setOrderedLibs(libraries)
+    } finally {
+      setSavingOrder(false)
+    }
+  }
+
+  function handleDrop(targetIndex: number) {
+    if (dragIndex === null || dragIndex === targetIndex) {
+      setDragIndex(null)
+      setDragOverIndex(null)
+      return
+    }
+    const next = [...orderedLibs]
+    const [moved] = next.splice(dragIndex, 1)
+    next.splice(targetIndex, 0, moved)
+    setDragIndex(null)
+    setDragOverIndex(null)
+    void commitOrder(next)
+  }
 
   async function createLibrary() {
     if (!name || !rootPath) return
@@ -1419,8 +1566,43 @@ function LibraryModal({
         </div>
       )}
 
-      {libraries.map((lib) => (
-        <div key={lib.id} className="citation-item" style={{ alignItems: 'center' }}>
+      {orderedLibs.length > 1 && (
+        <div style={{ fontSize: 11.5, color: 'var(--ink-faint)', marginBottom: 8, display: 'flex', alignItems: 'center', gap: 5 }}>
+          <GripVertical size={12} /> 拖拽左侧手柄可调整书架顺序（影响「按书架」分组与筛选栏排列）
+          {savingOrder && <Loader2 size={12} className="spin" />}
+        </div>
+      )}
+      {orderedLibs.map((lib, index) => (
+        <div
+          key={lib.id}
+          className={`citation-item shelf-order-row${dragOverIndex === index && dragIndex !== null && dragIndex !== index ? ' drag-over' : ''}${dragIndex === index ? ' dragging' : ''}`}
+          style={{ alignItems: 'center' }}
+          onDragOver={(e) => {
+            e.preventDefault()
+            if (dragOverIndex !== index) setDragOverIndex(index)
+          }}
+          onDragLeave={() => setDragOverIndex((prev) => (prev === index ? null : prev))}
+          onDrop={(e) => {
+            e.preventDefault()
+            handleDrop(index)
+          }}
+        >
+          <span
+            className="shelf-order-handle"
+            draggable
+            title="拖拽调整顺序"
+            aria-label="拖拽调整书架顺序"
+            onDragStart={(e) => {
+              setDragIndex(index)
+              e.dataTransfer.effectAllowed = 'move'
+            }}
+            onDragEnd={() => {
+              setDragIndex(null)
+              setDragOverIndex(null)
+            }}
+          >
+            <GripVertical size={15} />
+          </span>
           <div style={{ flex: 1, minWidth: 0 }}>
             {renamingId === lib.id ? (
               <div style={{ display: 'flex', gap: 6 }}>

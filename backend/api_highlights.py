@@ -1,5 +1,7 @@
 """api_highlights.py — 高亮 / 笔记 CRUD 与本书笔记目录"""
 
+import random
+from datetime import datetime
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -7,7 +9,7 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from database import get_db
-from models import Highlight, User
+from models import Highlight, User, Book, CitationBasketItem, CitationProject
 from security import get_current_user
 
 router = APIRouter(prefix="/api/highlights", tags=["Highlights"])
@@ -37,6 +39,63 @@ def list_highlights(book_id: str, db: Session = Depends(get_db), user: User = De
         .all()
     )
     return [_serialize(h) for h in rows]
+
+
+@router.get("/daily-quote")
+def get_daily_quote(db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    # 每天用固定种子选取一条非空 quote (来自 highlights 或 citation_basket_items)
+    
+    # 1. 查找 Highlights
+    highlight_rows = (
+        db.query(Highlight)
+        .filter(Highlight.user_id == user.id, Highlight.quoted_text != "")
+        .all()
+    )
+    
+    # 2. 查找 引用篮 CitationBasketItem
+    citation_rows = (
+        db.query(CitationBasketItem)
+        .join(CitationProject, CitationBasketItem.project_id == CitationProject.id)
+        .filter(CitationProject.user_id == user.id, CitationBasketItem.quoted_text != "")
+        .all()
+    )
+    
+    all_quotes = []
+    for h in highlight_rows:
+        all_quotes.append({
+            "id": h.id,
+            "book_id": h.book_id,
+            "quoted_text": h.quoted_text,
+            "cfi_range": h.cfi_range,
+            "page_no": h.page_no,
+        })
+    for c in citation_rows:
+        all_quotes.append({
+            "id": c.id,
+            "book_id": c.book_id,
+            "quoted_text": c.quoted_text,
+            "cfi_range": c.cfi_range,
+            "page_no": c.page_no,
+        })
+
+    if not all_quotes:
+        return None
+
+    seed = f"{datetime.utcnow().date()}-{user.id}"
+    rng = random.Random(seed)
+    chosen = rng.choice(all_quotes)
+    
+    book = db.query(Book).filter(Book.id == chosen["book_id"]).first()
+    
+    return {
+        "id": chosen["id"],
+        "book_id": chosen["book_id"],
+        "book_title": book.title if book else "未知书籍",
+        "book_format": book.file_format if book else "epub",
+        "quoted_text": chosen["quoted_text"],
+        "cfi_range": chosen["cfi_range"],
+        "page_no": chosen["page_no"],
+    }
 
 
 class HighlightPayload(BaseModel):

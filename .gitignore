@@ -34,3 +34,5 @@ Thumbs.db
 .tmp/
 tmp/
 .cache/
+ai_keys_backup.json
+scratch_import_keys.py

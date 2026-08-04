@@ -7,7 +7,7 @@ api_admin.py — 管理员后台：用户管理、系统状态、阅读统计仪
 import os
 import shutil
 import uuid
-from datetime import datetime, timedelta
+from datetime import datetime
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -267,6 +267,7 @@ def reading_stats(db: Session = Depends(get_db), user: User = Depends(get_curren
         .count()
     )
     favorites = db.query(UserFavorite).filter_by(user_id=user.id).count()
+    top_rated = db.query(Book).filter(Book.rating.isnot(None), Book.rating > 0).count()
 
     return {
         "total_books": total_books,
@@ -277,6 +278,7 @@ def reading_stats(db: Session = Depends(get_db), user: User = Depends(get_curren
         "total_citations": total_citations,
         "missing_douban": missing_douban,
         "favorites": favorites,
+        "top_rated": top_rated,
     }
 
 

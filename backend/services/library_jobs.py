@@ -109,7 +109,6 @@ def _ensure_worker() -> None:
 
 
 def _worker_loop() -> None:
-    global _running_library_id
     while True:
         library_id = None
         with _pending_lock:

@@ -90,9 +90,8 @@ export function withPointer(
 }
 
 /**
- * 指针右侧优先：默认出现在松手点右侧，纵向贴近指针；
- * 右侧不够则翻到左侧；上下夹边，避免挡住刚选中的文字。
- * 锚点优先：pointer → end → 旧 x/y。
+ * 指针优先改为选区中心居中优先：默认出现在选中文字上方居中；
+ * 如果上方空间不够则翻到下方居中；如果下方也不够，则约束在视口内。
  */
 export function placeSelectionMenu(opts: {
   anchor: SelectionAnchor
@@ -105,35 +104,33 @@ export function placeSelectionMenu(opts: {
   const menuH = opts.menuH ?? SELECTION_MENU_H
   const { containerW, containerH, anchor } = opts
 
-  const ax =
-    anchor.pointerX != null ? anchor.pointerX : anchor.endX != null ? anchor.endX : anchor.x
-  const ay =
-    anchor.pointerY != null
-      ? anchor.pointerY
-      : anchor.endY != null
-        ? anchor.endY
-        : anchor.y + (anchor.height || 0)
+  // 计算选区中心点
+  // 如果有多行，anchor.x 和 anchor.y 通常是第一行的。
+  // 为了美观，我们采用 anchor.x 减去可能的一半宽度？
+  // 注意：在 rangeToSelectionAnchor 中，anchor.x 已经是第一行的 center (left + width/2)
+  const selectionCenterX = anchor.x
+  const selectionTop = anchor.y
+  const selectionBottom = anchor.y + (anchor.height || 20)
 
-  let left = ax + GAP
-  let placement: MenuPlacement = 'anchored'
-
-  // 右侧不够：翻到指针左侧
-  if (left + menuW > containerW - PAD) {
-    left = ax - menuW - GAP
-  }
+  // 默认水平居中对齐选中文字
+  let left = selectionCenterX - menuW / 2
+  // 确保不溢出左右边界
   left = Math.max(PAD, Math.min(left, containerW - menuW - PAD))
 
-  // 纵向贴近指针略偏上，减少盖住指针下方续选区域
-  let top = ay - 28
-  if (top + menuH > containerH - PAD) {
-    top = containerH - menuH - PAD
-    placement = 'anchored-above'
-  }
+  // 默认出现在选中文字的上方
+  let top = selectionTop - menuH - GAP
+  let placement: MenuPlacement = 'anchored-above'
+
+  // 如果上方空间不够，则尝试放到下方
   if (top < PAD) {
-    top = PAD
+    top = selectionBottom + GAP
     placement = 'anchored-below'
+    
+    // 如果下方也不够，则强制约束在视口内（贴近顶部或底部）
+    if (top + menuH > containerH - PAD) {
+      top = Math.max(PAD, containerH - menuH - PAD)
+    }
   }
-  top = Math.max(PAD, Math.min(top, Math.max(PAD, containerH - menuH - PAD)))
 
   return { left, top, placement }
 }

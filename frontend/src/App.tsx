@@ -9,6 +9,7 @@ import ReaderPage from './pages/ReaderPage'
 import CitationBasketPage from './pages/CitationBasketPage'
 import AdminPage from './pages/AdminPage'
 import SearchPage from './pages/SearchPage'
+import AiReaderPage from './pages/AiReaderPage'
 
 function RequireAuth({ children }: { children: React.ReactNode }) {
   const { user, loading } = useAuth()
@@ -53,6 +54,7 @@ export default function App() {
                 <Route path="/books/:bookId" element={<BookDetailPage />} />
                 <Route path="/citation" element={<CitationBasketPage />} />
                 <Route path="/search" element={<SearchPage />} />
+                <Route path="/ai-reader" element={<AiReaderPage />} />
                 <Route
                   path="/admin"
                   element={

@@ -25,7 +25,7 @@ export const tiltSpring: Transition = {
   mass: 0.7,
 }
 
-/** 路由 ink-reveal：深邃的揭开效果 */
+/** 路由 ink-reveal：深邃的揭开效果（桌面端） */
 export const inkRevealVariants: Variants = {
   initial: {
     opacity: 0.72,
@@ -47,6 +47,24 @@ export const inkRevealVariants: Variants = {
     y: -16,
     clipPath: 'inset(18% 0 0 0)',
     transition: { duration: 0.35, ease: easeInInk },
+  },
+}
+
+/**
+ * 移动端页面切换：不用 clipPath 整页裁切。
+ * 桌面那套「从底部揭开」在小屏上会让每个页面先空白半秒，AI 伴读等复杂页
+ * 还可能和 overflow 叠在一起偶发整页不显示。
+ */
+export const mobilePageVariants: Variants = {
+  initial: { opacity: 0, y: 10 },
+  animate: {
+    opacity: 1,
+    y: 0,
+    transition: { duration: 0.22, ease: easeOutExpo },
+  },
+  exit: {
+    opacity: 0,
+    transition: { duration: 0.12, ease: easeInInk },
   },
 }
 

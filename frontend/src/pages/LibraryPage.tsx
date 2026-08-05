@@ -28,6 +28,7 @@ import Modal from '../components/Modal'
 import MotionGrid from '../components/MotionGrid'
 import { useAuth } from '../contexts/AuthContext'
 import { trackGlow } from '../lib/glowTrack'
+import { bumpRecommendOffset, pickRecommendedBooks } from '../lib/recommendedBooks'
 import { useRowCapacity } from '../lib/useRowCapacity'
 
 interface Stats {
@@ -636,17 +637,20 @@ export default function LibraryPage() {
   const effectiveGroupMode: GroupMode =
     metaFilter === 'missing_douban' || metaFilter === 'favorited' ? 'flat' : groupMode
 
-  // 高分推荐：书籍内容区首行，有豆瓣评分的书按评分从高到低排列（不限阅读状态），
-  // 只在「纯浏览」场景（无搜索/筛选）展示，行内数量随容器宽度自适应
-  const [recommendedCapacity, recommendedRowRef] = useRowCapacity({ minItemWidth: 158, gap: 22, min: 3, max: 16 })
-  const recommendedBooks = useMemo(() => {
-    return books
-      .filter((b) => (b.rating || 0) > 0)
-      .sort((a, b) => (b.rating || 0) - (a.rating || 0))
-  }, [books])
+  // 高分推荐：首行展示；未读优先 + 日更轮换 + 可「换一批」，避免永远只露同一排高分书
+  const [recommendedCapacity, recommendedRowRef] = useRowCapacity({ minItemWidth: 158, gap: 22, min: 2, max: 16 })
+  const [recommendTick, setRecommendTick] = useState(0)
+  const { pool: recommendPool, visible: visibleRecommended } = useMemo(() => {
+    void recommendTick
+    return pickRecommendedBooks(books, recommendedCapacity)
+  }, [books, recommendedCapacity, recommendTick])
   const showRecommended =
-    !loading && !metaFilter && !q && !activeTag && !activeLibrary && !status && recommendedBooks.length > 0
-  const visibleRecommended = recommendedBooks.slice(0, recommendedCapacity)
+    !loading && !metaFilter && !q && !activeTag && !activeLibrary && !status && visibleRecommended.length > 0
+
+  function shuffleRecommended() {
+    bumpRecommendOffset(recommendPool.length, Math.max(recommendedCapacity, 2))
+    setRecommendTick((n) => n + 1)
+  }
 
   function toggleSection(key: string) {
     setCollapsed((prev) => ({ ...prev, [key]: !prev[key] }))
@@ -1047,6 +1051,11 @@ export default function LibraryPage() {
           <section className="home-section library-recommend-section">
             <div className="home-section-header">
               <div className="home-section-title library-recommend-title">高分推荐</div>
+              {recommendPool.length > visibleRecommended.length && (
+                <button type="button" className="btn btn-sm library-recommend-shuffle" onClick={shuffleRecommended}>
+                  <RefreshCw size={13} /> 换一批
+                </button>
+              )}
             </div>
             <MotionGrid className="book-grid book-grid-row" dense mount ref={recommendedRowRef}>
               {visibleRecommended.map((b) => (

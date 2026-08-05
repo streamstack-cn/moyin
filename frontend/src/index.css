@@ -286,9 +286,12 @@ button {
 .main-area-enter {
   display: flex;
   flex-direction: column;
-  flex: 1;
-  min-height: 0;
+  /* 默认随内容增高，让 .main-area 出现纵向滚动。
+     若写成 flex:1 + min-height:0，包裹层会被锁在视口高度内，书库平铺等长列表
+     的后半段既滚不到也看不见——移动端「平铺只剩高分推荐」正是这个原因。 */
+  flex: 1 0 auto;
   width: 100%;
+  min-width: 0;
 }
 
 /* ── 移动端顶栏 / 侧边栏抽屉（默认桌面端隐藏） ───────────────────────── */
@@ -5299,6 +5302,24 @@ button.stat-strip-item.clickable.active .stat-strip-value {
   color: var(--gold-strong);
 }
 
+.library-recommend-section .home-section-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.library-recommend-shuffle {
+  flex-shrink: 0;
+  color: var(--gold-strong);
+  border-color: color-mix(in srgb, var(--gold) 35%, var(--border));
+  background: color-mix(in srgb, var(--gold) 10%, transparent);
+}
+
+.library-recommend-shuffle:hover {
+  background: color-mix(in srgb, var(--gold) 18%, transparent);
+}
+
 .book-grid-row {
   grid-auto-flow: column;
   grid-auto-columns: minmax(158px, 1fr);
@@ -6418,15 +6439,16 @@ button.stat-strip-item.clickable.active .stat-strip-value {
 }
 
 @media (max-width: 800px) {
-  /* AI 伴读：整页锁在视口内滚动，避免「面板用 100dvh 估高 + 顶栏/分段控件」叠出
-     超长外层滚动，下拉露出大片黑色空底。 */
+  /* AI 伴读：整页锁在视口内，由面板内部滚动；其它页面仍靠 .main-area 外层滚动。 */
   .main-area:has(.ai-reader-page-content) {
     min-height: 0;
     overflow: hidden;
   }
 
   .main-area-enter:has(.ai-reader-page-content) {
+    flex: 1 1 auto;
     min-height: 0;
+    height: 100%;
     overflow: hidden;
   }
 

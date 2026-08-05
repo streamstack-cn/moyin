@@ -31,7 +31,8 @@ const MotionGrid = forwardRef<
       variants={variants}
       initial="initial"
       whileInView="animate"
-      viewport={{ once: true, margin: '0px 0px -48px 0px', amount: 0.12 }}
+      /* 小屏上 -48px / 12% 门槛容易让网格长期停在 opacity:0，看起来像「页面没出来」 */
+      viewport={{ once: true, margin: '120px 0px 120px 0px', amount: 0.01 }}
     >
       {children}
     </motion.div>

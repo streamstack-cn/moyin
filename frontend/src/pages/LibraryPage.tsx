@@ -1074,7 +1074,7 @@ export default function LibraryPage() {
         ) : effectiveGroupMode === 'flat' ? (
           <div className="library-section flat">
             <div className="library-shelf-rail" aria-hidden />
-            <MotionGrid className="book-grid">
+            <MotionGrid className="book-grid" mount>
               {filteredBooks.map((b) => (
                 <BookCard
                   key={b.id}
@@ -1109,7 +1109,7 @@ export default function LibraryPage() {
                   {!isCollapsed && (
                     <>
                       <div className="library-shelf-rail" aria-hidden />
-                      <MotionGrid className="book-grid">
+                      <MotionGrid className="book-grid" mount>
                         {section.books.map((b) => (
                           <BookCard
                             key={`${section.key}-${b.id}`}

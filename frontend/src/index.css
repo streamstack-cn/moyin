@@ -84,6 +84,8 @@ html {
   width: 100%;
   max-width: 100%;
   overflow-x: clip;
+  /* 禁止双击放大，避免详情/搜索页偶发被浏览器放大后需手动捏合缩小 */
+  touch-action: manipulation;
   /* 用 min-height 而非固定 height，长页面（如目录很长的书籍详情）才能把背景铺满整页 */
   min-height: 100%;
   background-color: var(--bg-0);
@@ -5651,6 +5653,11 @@ button.stat-strip-item.clickable.active .stat-strip-value {
   .app-shell {
     flex-direction: column;
     background-color: transparent;
+    /* 小屏把壳子锁在可视高度内，由 .main-area 负责滚动，避免「整页+内层」双滚动
+       或内容估高后下方露出大片黑底 */
+    height: 100dvh;
+    max-height: 100dvh;
+    overflow: hidden;
   }
 
   .sidebar {
@@ -5687,18 +5694,60 @@ button.stat-strip-item.clickable.active .stat-strip-value {
 
   .main-area {
     width: 100%;
+    flex: 1;
+    /* 覆盖桌面态的 min-height:100dvh——否则「顶栏 + 再一整屏主区」必然超高，
+       下拉就会露出底部黑边（AI 伴读尤其明显） */
+    min-height: 0;
+    overflow-x: clip;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
   }
 
   .topbar {
     padding: 16px 18px;
+    flex-shrink: 0;
   }
 
   .page-content {
-    padding-bottom: calc(48px + env(safe-area-inset-bottom, 0px));
+    padding: 18px 16px calc(48px + env(safe-area-inset-bottom, 0px));
+    min-width: 0;
   }
 
-  .page-content {
-    padding: 18px 16px 48px;
+  /* iOS 聚焦字号 <16px 的输入框会强制放大页面，离开后常无法自动缩回 */
+  .input,
+  select.input,
+  textarea.input,
+  .search-input,
+  .home-search-field input,
+  .search-box input,
+  .glow-field > .input {
+    font-size: 16px;
+  }
+
+  .book-detail {
+    gap: 20px;
+  }
+
+  .book-detail-aside {
+    width: min(100%, 200px);
+    margin-inline: auto;
+  }
+
+  .book-detail-main {
+    min-width: 0;
+    width: 100%;
+    flex: 1 1 auto;
+  }
+
+  .book-detail-meta {
+    grid-template-columns: 1fr;
+  }
+
+  img,
+  svg,
+  video,
+  canvas {
+    max-width: 100%;
   }
 
   .page-title {
@@ -6369,15 +6418,31 @@ button.stat-strip-item.clickable.active .stat-strip-value {
 }
 
 @media (max-width: 800px) {
+  /* AI 伴读：整页锁在视口内滚动，避免「面板用 100dvh 估高 + 顶栏/分段控件」叠出
+     超长外层滚动，下拉露出大片黑色空底。 */
+  .main-area:has(.ai-reader-page-content) {
+    min-height: 0;
+    overflow: hidden;
+  }
+
+  .main-area-enter:has(.ai-reader-page-content) {
+    min-height: 0;
+    overflow: hidden;
+  }
+
   .ai-reader-mobile-tabs {
     display: flex;
     /* .page-content 在移动端已经有 16px 左右内边距，这里不能再叠加桌面态遗留的
        32px margin，否则分段控件会比下面拉伸到整行宽度的面板明显窄一截、缩进对不齐 */
     margin: 12px 0 0;
+    flex-shrink: 0;
   }
 
   .ai-reader-page-content {
-    overflow: visible;
+    flex: 1;
+    min-height: 0;
+    overflow: hidden;
+    padding-bottom: 12px;
   }
 
   .ai-reader-layout {
@@ -6388,8 +6453,11 @@ button.stat-strip-item.clickable.active .stat-strip-value {
        右边大片留白——这正是小屏下「选书/素材/报告」面板显示不全的根因，
        必须显式改回 stretch 让面板撑满整行宽度。 */
     align-items: stretch;
+    flex: 1;
+    min-height: 0;
     height: auto;
-    overflow: visible;
+    overflow: hidden;
+    padding: 0;
   }
 
   .ai-reader-col-books,
@@ -6398,8 +6466,9 @@ button.stat-strip-item.clickable.active .stat-strip-value {
     display: none;
     width: 100%;
     min-width: 0;
-    height: calc(100dvh - 210px);
-    min-height: 360px;
+    flex: 1;
+    min-height: 0;
+    height: auto;
   }
 
   .ai-reader-col-books.mobile-visible,

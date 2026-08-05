@@ -4,7 +4,8 @@ import { AnimatePresence, motion, useReducedMotion } from 'framer-motion'
 import { Feather, Home, LayoutGrid, LogOut, Menu, Moon, Lightbulb, ShieldCheck, Sun, X } from 'lucide-react'
 import { useAuth } from '../contexts/AuthContext'
 import { useTheme } from '../contexts/ThemeContext'
-import { easeOutExpo, inkRevealVariants, softSpring } from '../lib/motion'
+import { easeOutExpo, inkRevealVariants, mobilePageVariants, softSpring } from '../lib/motion'
+import { useMediaQuery } from '../lib/useMediaQuery'
 import { APP_VERSION_LABEL } from '../version'
 
 function NavItem({ to, icon, label }: { to: string; icon: ReactNode; label: string }) {
@@ -44,7 +45,9 @@ export default function Layout({ children }: { children: ReactNode }) {
   const navigate = useNavigate()
   const location = useLocation()
   const reduceMotion = useReducedMotion()
+  const isCompact = useMediaQuery('(max-width: 900px)')
   const [mobileOpen, setMobileOpen] = useState(false)
+  const pageVariants = isCompact ? mobilePageVariants : inkRevealVariants
 
   return (
     <div className="app-shell">
@@ -138,12 +141,13 @@ export default function Layout({ children }: { children: ReactNode }) {
           <motion.div
             key={location.pathname}
             className="main-area-enter"
-            variants={reduceMotion ? undefined : inkRevealVariants}
+            variants={reduceMotion ? undefined : pageVariants}
             initial={reduceMotion ? false : 'initial'}
             animate="animate"
             exit={reduceMotion ? undefined : 'exit'}
           >
-            {!reduceMotion && (
+            {/* 墨色遮罩仅桌面使用；移动端会额外拖慢首屏可见时间 */}
+            {!reduceMotion && !isCompact && (
               <motion.div
                 className="ink-veil"
                 initial={{ opacity: 0.38, scaleY: 1 }}

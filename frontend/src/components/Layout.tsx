@@ -4,7 +4,7 @@ import { AnimatePresence, motion, useReducedMotion } from 'framer-motion'
 import { Feather, Home, LayoutGrid, LogOut, Menu, Moon, Lightbulb, ShieldCheck, Sun, X } from 'lucide-react'
 import { useAuth } from '../contexts/AuthContext'
 import { useTheme } from '../contexts/ThemeContext'
-import { easeOutExpo, inkRevealVariants, mobilePageVariants, softSpring } from '../lib/motion'
+import { easeOutExpo, inkRevealVariants, softSpring } from '../lib/motion'
 import { useMediaQuery } from '../lib/useMediaQuery'
 import { APP_VERSION_LABEL } from '../version'
 
@@ -47,7 +47,6 @@ export default function Layout({ children }: { children: ReactNode }) {
   const reduceMotion = useReducedMotion()
   const isCompact = useMediaQuery('(max-width: 900px)')
   const [mobileOpen, setMobileOpen] = useState(false)
-  const pageVariants = isCompact ? mobilePageVariants : inkRevealVariants
 
   return (
     <div className="app-shell">
@@ -137,17 +136,22 @@ export default function Layout({ children }: { children: ReactNode }) {
       </aside>
 
       <div className="main-area">
-        <AnimatePresence mode="wait">
-          <motion.div
-            key={location.pathname}
-            className="main-area-enter"
-            variants={reduceMotion ? undefined : pageVariants}
-            initial={reduceMotion ? false : 'initial'}
-            animate="animate"
-            exit={reduceMotion ? undefined : 'exit'}
-          >
-            {/* 墨色遮罩仅桌面使用；移动端会额外拖慢首屏可见时间 */}
-            {!reduceMotion && !isCompact && (
+        {/* 小屏关闭路由过渡动画：Framer 的 opacity/clipPath 进场在 iOS 上偶发停在
+           透明态，表现为 AI 伴读等页面整页空白；桌面仍保留 ink-reveal。 */}
+        {isCompact || reduceMotion ? (
+          <div key={location.pathname} className="main-area-enter">
+            {children}
+          </div>
+        ) : (
+          <AnimatePresence mode="wait">
+            <motion.div
+              key={location.pathname}
+              className="main-area-enter"
+              variants={inkRevealVariants}
+              initial="initial"
+              animate="animate"
+              exit="exit"
+            >
               <motion.div
                 className="ink-veil"
                 initial={{ opacity: 0.38, scaleY: 1 }}
@@ -156,10 +160,10 @@ export default function Layout({ children }: { children: ReactNode }) {
                 style={{ originY: 0 }}
                 aria-hidden
               />
-            )}
-            {children}
-          </motion.div>
-        </AnimatePresence>
+              {children}
+            </motion.div>
+          </AnimatePresence>
+        )}
       </div>
     </div>
   )

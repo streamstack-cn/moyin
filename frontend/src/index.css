@@ -3815,7 +3815,8 @@ mark.search-hit-mark,
   border-radius: 999px;
   background: color-mix(in srgb, var(--ink) 5%, transparent);
   border: 1px solid var(--border);
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
+  max-width: 100%;
 }
 
 .admin-tab {
@@ -5661,11 +5662,13 @@ button.stat-strip-item.clickable.active .stat-strip-value {
     background: var(--glass-bg);
     backdrop-filter: blur(22px) saturate(180%);
     -webkit-backdrop-filter: blur(22px) saturate(180%);
-    position: sticky;
+    /* fixed：避免主内容区合成层在 iOS 上盖住顶栏，导致三条杠点不动 */
+    position: fixed;
     top: 0;
-    z-index: 40;
+    left: 0;
+    right: 0;
+    z-index: 300;
     flex-shrink: 0;
-    /* 菜单/主题按钮必须落在刘海下方 */
     min-height: calc(48px + env(safe-area-inset-top, 0px));
     pointer-events: auto;
     touch-action: manipulation;
@@ -5674,11 +5677,11 @@ button.stat-strip-item.clickable.active .stat-strip-value {
   .app-shell {
     flex-direction: column;
     background-color: transparent;
-    /* 小屏把壳子锁在可视高度内，由 .main-area 负责滚动，避免「整页+内层」双滚动
-       或内容估高后下方露出大片黑底 */
     height: 100dvh;
     max-height: 100dvh;
     overflow: hidden;
+    /* 给 fixed 顶栏留出高度，避免首屏内容钻到顶栏下面 */
+    padding-top: calc(48px + env(safe-area-inset-top, 0px));
   }
 
   .sidebar {
@@ -5687,17 +5690,20 @@ button.stat-strip-item.clickable.active .stat-strip-value {
     width: 78vw;
     max-width: 300px;
     height: 100dvh;
-    z-index: 210;
+    z-index: 320;
     transform: translateX(-100%);
     transition: transform 0.22s ease;
     box-shadow: 0 0 0 rgba(0, 0, 0, 0);
     padding-top: calc(16px + env(safe-area-inset-top, 0px));
     padding-bottom: env(safe-area-inset-bottom, 0px);
+    /* 关闭时不接点击，否则离屏侧栏仍可能挡住左上角菜单按钮 */
+    pointer-events: none;
   }
 
   .sidebar.sidebar-open {
     transform: translateX(0);
     box-shadow: 20px 0 50px rgba(0, 0, 0, 0.5);
+    pointer-events: auto;
   }
 
   .icon-btn.sidebar-close {
@@ -5710,7 +5716,7 @@ button.stat-strip-item.clickable.active .stat-strip-value {
     inset: 0;
     background: rgba(6, 5, 4, 0.6);
     backdrop-filter: blur(2px);
-    z-index: 200;
+    z-index: 310;
   }
 
   .main-area {
@@ -5773,6 +5779,33 @@ button.stat-strip-item.clickable.active .stat-strip-value {
 
   .page-title {
     font-size: 21px;
+  }
+
+  /* 管理后台分区：窄屏改为 2×2 圆角网格，避免胶囊条里第四个按钮掉到下一行撑破外形 */
+  .admin-tabs {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    width: 100%;
+    align-self: stretch;
+    gap: 4px;
+    padding: 4px;
+    border-radius: 14px;
+    flex-wrap: unset;
+  }
+
+  .admin-tab {
+    justify-content: center;
+    padding: 10px 8px;
+    font-size: 12.5px;
+    gap: 5px;
+    border-radius: 10px;
+    min-width: 0;
+  }
+
+  .admin-tab svg {
+    width: 14px;
+    height: 14px;
+    flex-shrink: 0;
   }
 
   .book-grid {
@@ -6439,47 +6472,47 @@ button.stat-strip-item.clickable.active .stat-strip-value {
 }
 
 @media (max-width: 800px) {
-  /* AI 伴读：整页锁在视口内，由面板内部滚动；其它页面仍靠 .main-area 外层滚动。 */
-  .main-area:has(.ai-reader-page-content) {
-    min-height: 0;
-    overflow: hidden;
-  }
-
+  /* AI 伴读小屏：改为文档流自然增高 + 外层滚动，不再用 100% 高度链锁死——
+     后者在 iOS 上容易把整页算成 0 高，看起来像「什么都没有」。 */
+  .main-area:has(.ai-reader-page-content),
   .main-area-enter:has(.ai-reader-page-content) {
-    flex: 1 1 auto;
+    overflow: visible;
+    height: auto;
     min-height: 0;
-    height: 100%;
-    overflow: hidden;
   }
 
   .ai-reader-mobile-tabs {
     display: flex;
-    /* .page-content 在移动端已经有 16px 左右内边距，这里不能再叠加桌面态遗留的
-       32px margin，否则分段控件会比下面拉伸到整行宽度的面板明显窄一截、缩进对不齐 */
     margin: 12px 0 0;
     flex-shrink: 0;
+    position: relative;
+    z-index: 1;
   }
 
   .ai-reader-page-content {
-    flex: 1;
+    display: flex;
+    flex-direction: column;
+    flex: none;
+    overflow: visible;
     min-height: 0;
-    overflow: hidden;
-    padding-bottom: 12px;
+    padding-bottom: calc(24px + env(safe-area-inset-bottom, 0px));
+  }
+
+  .ai-reader-page-content > * {
+    position: relative;
+    z-index: 1;
   }
 
   .ai-reader-layout {
     display: flex;
     flex-direction: column;
-    /* 桌面网格布局留下的 align-items: start 在 flex 场景里代表「横轴按内容宽度
-       收缩、贴左对齐」，导致移动端切出来的单个面板只有文字内容那么宽，
-       右边大片留白——这正是小屏下「选书/素材/报告」面板显示不全的根因，
-       必须显式改回 stretch 让面板撑满整行宽度。 */
     align-items: stretch;
-    flex: 1;
+    flex: none;
     min-height: 0;
     height: auto;
-    overflow: hidden;
+    overflow: visible;
     padding: 0;
+    gap: 12px;
   }
 
   .ai-reader-col-books,
@@ -6488,15 +6521,25 @@ button.stat-strip-item.clickable.active .stat-strip-value {
     display: none;
     width: 100%;
     min-width: 0;
-    flex: 1;
-    min-height: 0;
+    flex: none;
     height: auto;
+    min-height: min(70dvh, 560px);
+    max-height: none;
   }
 
   .ai-reader-col-books.mobile-visible,
   .ai-reader-col-material.mobile-visible,
   .ai-reader-col-report.mobile-visible {
     display: flex !important;
+  }
+
+  .ai-reader-col-books .ai-book-list,
+  .ai-reader-col-material > div:last-child,
+  .ai-reader-col-report > div:last-child {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
   }
 }
 

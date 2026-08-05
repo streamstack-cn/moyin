@@ -1,6 +1,9 @@
-import { forwardRef, type ReactNode } from 'react'
+import { Children, forwardRef, type ReactNode } from 'react'
 import { motion, useReducedMotion } from 'framer-motion'
 import { gridStaggerContainer, staggerContainer } from '../lib/motion'
+
+/** 超过这个数量就关闭错落入场，避免平铺数百本书时后半段长时间透明 */
+const STAGGER_CHILD_LIMIT = 36
 
 /** 网格 / 横滑书架：子项 stagger 进场（需子组件挂 staggerItem variants） */
 const MotionGrid = forwardRef<
@@ -8,7 +11,10 @@ const MotionGrid = forwardRef<
   { className?: string; children: ReactNode; dense?: boolean; mount?: boolean }
 >(function MotionGrid({ className, children, dense = true, mount }, ref) {
   const reduceMotion = useReducedMotion()
-  if (reduceMotion) {
+  const childCount = Children.count(children)
+  const skipMotion = reduceMotion || childCount > STAGGER_CHILD_LIMIT
+
+  if (skipMotion) {
     return (
       <div ref={ref} className={className}>
         {children}

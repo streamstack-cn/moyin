@@ -1,6 +1,6 @@
 # 墨引 MoYin
 
-当前版本：**V0.65**（应用内版本号；Docker 镜像标签 **`latest`** / **`v0.65`**）
+当前版本：**V0.7**（应用内版本号；Docker 镜像标签 **`latest`** / **`v0.7`**）
 
 **私有化部署的电子书阅读 · 标注 · 引用 · AI 伴读管理系统**
 
@@ -192,7 +192,7 @@ services:
 ```bash
 docker pull streamstack/moyin:latest
 # 或固定版本
-docker pull streamstack/moyin:v0.65
+docker pull streamstack/moyin:v0.7
 ```
 
 内含：Nginx + FastAPI + Calibre + LibreOffice Writer  

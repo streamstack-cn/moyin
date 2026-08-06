@@ -14,4 +14,12 @@ export interface SelectionAnchor {
   /** 松手时指针位置（优先于 end） */
   pointerX?: number
   pointerY?: number
+  /** 顶层窗口屏幕坐标包围盒（position:fixed 横条用） */
+  screen?: {
+    top: number
+    bottom: number
+    left: number
+    right: number
+    midX: number
+  }
 }

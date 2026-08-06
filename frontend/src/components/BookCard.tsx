@@ -2,9 +2,10 @@ import { useEffect, useState, type MouseEvent } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { motion, useReducedMotion } from 'framer-motion'
 import { toast } from 'sonner'
-import { BookText, Check, Download, Star } from 'lucide-react'
+import { BookText, Check, Star } from 'lucide-react'
+import { useTapGuard } from '../hooks/useTapGuard'
 import { staggerItem } from '../lib/motion'
-import { api, ApiError, downloadUrl } from '../api/client'
+import { api, ApiError } from '../api/client'
 import type { BookSummary } from '../api/types'
 import { formatChipClass, formatLabel } from '../lib/bookFormat'
 import CoverTilt from './CoverTilt'
@@ -21,6 +22,7 @@ interface Props {
 export default function BookCard({ book, onFavoriteChange, selectable, selected, onToggleSelect }: Props) {
   const navigate = useNavigate()
   const reduceMotion = useReducedMotion()
+  const tap = useTapGuard(14)
   const [fav, setFav] = useState(!!book.is_favorite)
   const [busy, setBusy] = useState(false)
 
@@ -32,13 +34,13 @@ export default function BookCard({ book, onFavoriteChange, selectable, selected,
     navigate(`/books/${book.id}`)
   }
 
-  function onCardClick() {
+  const onCardClick = tap.guardClick(() => {
     if (selectable) {
       onToggleSelect?.(book.id)
       return
     }
     openDetail()
-  }
+  })
 
   function goDetail(e: MouseEvent) {
     e.stopPropagation()
@@ -77,11 +79,17 @@ export default function BookCard({ book, onFavoriteChange, selectable, selected,
       className={`book-card${selectable ? ' selectable' : ''}${selected ? ' selected' : ''}`}
       role="button"
       tabIndex={0}
+      onPointerDown={tap.onPointerDown}
+      onPointerMove={tap.onPointerMove}
+      onPointerUp={tap.onPointerUp}
+      onPointerCancel={tap.onPointerCancel}
       onClick={onCardClick}
       onKeyDown={(e) => {
         if (e.key === 'Enter' || e.key === ' ') {
           e.preventDefault()
-          onCardClick()
+          if (tap.shouldIgnoreTap()) return
+          if (selectable) onToggleSelect?.(book.id)
+          else openDetail()
         }
       }}
       variants={reduceMotion ? undefined : staggerItem}
@@ -111,7 +119,7 @@ export default function BookCard({ book, onFavoriteChange, selectable, selected,
           <div className="book-finished-badge" title="已读完">
             已读
           </div>
-        ) : book.reading_percent > 0 && book.reading_percent < 100 ? (
+        ) : book.reading_status === 'reading' && book.reading_percent > 0 && book.reading_percent < 100 ? (
           <div className="book-progress-bar">
             <div className="book-progress-fill" style={{ width: `${book.reading_percent}%` }} />
           </div>
@@ -131,16 +139,7 @@ export default function BookCard({ book, onFavoriteChange, selectable, selected,
           <button type="button" className="book-detail-btn" title="查看详情" onClick={goDetail}>
             详情
           </button>
-        ) : (
-          <a
-            className="book-download-btn"
-            href={downloadUrl(`/api/books/${book.id}/file`)}
-            title="下载原文件"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <Download size={13} />
-          </a>
-        )}
+        ) : null}
         <button
           type="button"
           className={`book-fav-btn${fav ? ' active' : ''}`}

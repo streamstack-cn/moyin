@@ -19,7 +19,9 @@ from models import User
 
 SECRET_KEY = os.environ.get("MOYIN_SECRET_KEY", "moyin-dev-secret-change-me")
 ALGORITHM = "HS256"
-TOKEN_EXPIRE_HOURS = int(os.environ.get("MOYIN_TOKEN_EXPIRE_HOURS", "24") or 24)
+# 「保持登录」：默认 30 天；关闭后仅会话级，默认 12 小时
+TOKEN_EXPIRE_HOURS = int(os.environ.get("MOYIN_TOKEN_EXPIRE_HOURS", "720") or 720)
+TOKEN_SESSION_EXPIRE_HOURS = int(os.environ.get("MOYIN_TOKEN_SESSION_EXPIRE_HOURS", "12") or 12)
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
@@ -35,8 +37,9 @@ def verify_password(password: str, password_hash: str) -> bool:
         return False
 
 
-def create_access_token(user: User) -> str:
-    expire = datetime.now(timezone.utc) + timedelta(hours=TOKEN_EXPIRE_HOURS)
+def create_access_token(user: User, remember_me: bool = True) -> str:
+    hours = TOKEN_EXPIRE_HOURS if remember_me else TOKEN_SESSION_EXPIRE_HOURS
+    expire = datetime.now(timezone.utc) + timedelta(hours=max(1, hours))
     payload = {"sub": user.id, "username": user.username, "role": user.role, "exp": expire}
     return jwt.encode(payload, SECRET_KEY, algorithm=ALGORITHM)
 

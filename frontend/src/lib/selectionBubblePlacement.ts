@@ -1,12 +1,18 @@
-/** 选区气泡：锚点解析与指针右侧优先定位（避免遮挡选中文字） */
+/** 选区气泡：锚点解析与上/下方横条定位（避免遮挡选中文字） */
 
 import type { SelectionAnchor } from './readerConstants'
 
-const PAD = 12
-const GAP = 12
-/** 菜单默认尺寸估算（含笔记展开余量的保守高度） */
-export const SELECTION_MENU_W = 220
-export const SELECTION_MENU_H = 280
+const PAD = 10
+const GAP = 10
+/** 苹果式横条默认尺寸 */
+export const SELECTION_BAR_W = 340
+export const SELECTION_BAR_H = 44
+export const SELECTION_BAR_H_WITH_TRANSLATE = 78
+
+/** @deprecated 兼容旧命名 */
+export const SELECTION_MENU_W = SELECTION_BAR_W
+/** @deprecated 兼容旧命名 */
+export const SELECTION_MENU_H = 220
 
 export type MenuPlacement = 'fallback' | 'anchored' | 'anchored-below' | 'anchored-above'
 
@@ -64,6 +70,51 @@ export function rangeToSelectionAnchor(range: Range, offset: ViewportOffset): Se
   }
 }
 
+/** iframe 内 Range → 顶层窗口屏幕坐标包围盒（供 position:fixed） */
+export function rangeToScreenBounds(
+  range: Range,
+  iframeEl: Element | null | undefined,
+): NonNullable<SelectionAnchor['screen']> | null {
+  const rects = validRects(range)
+  const iframeRect = iframeEl?.getBoundingClientRect()
+  const ox = iframeRect?.left || 0
+  const oy = iframeRect?.top || 0
+
+  let top = Infinity
+  let bottom = -Infinity
+  let left = Infinity
+  let right = -Infinity
+
+  if (rects.length) {
+    for (const r of rects) {
+      top = Math.min(top, r.top + oy)
+      bottom = Math.max(bottom, r.bottom + oy)
+      left = Math.min(left, r.left + ox)
+      right = Math.max(right, r.right + ox)
+    }
+  } else {
+    try {
+      const rect = range.getBoundingClientRect()
+      if (!rect || (!rect.width && !rect.height)) return null
+      top = rect.top + oy
+      bottom = rect.bottom + oy
+      left = rect.left + ox
+      right = rect.right + ox
+    } catch {
+      return null
+    }
+  }
+
+  if (!Number.isFinite(top) || !Number.isFinite(bottom)) return null
+  return {
+    top,
+    bottom,
+    left,
+    right,
+    midX: (left + right) / 2,
+  }
+}
+
 /** 指针相对阅读视口的坐标 */
 export function pointerToViewport(
   clientX: number,
@@ -90,8 +141,58 @@ export function withPointer(
 }
 
 /**
- * 指针优先改为选区中心居中优先：默认出现在选中文字上方居中；
- * 如果上方空间不够则翻到下方居中；如果下方也不够，则约束在视口内。
+ * 苹果式横条：优先选区上方居中；上方不够则下方；始终不压住选区。
+ * 使用屏幕坐标 + position:fixed。
+ */
+export function placeSelectionBar(opts: {
+  screen: NonNullable<SelectionAnchor['screen']>
+  menuW: number
+  menuH: number
+  viewportW?: number
+  viewportH?: number
+  safeTop?: number
+  safeBottom?: number
+}): MenuBox {
+  const menuW = opts.menuW
+  const menuH = opts.menuH
+  const vw = opts.viewportW ?? (typeof window !== 'undefined' ? window.innerWidth : 390)
+  const vh = opts.viewportH ?? (typeof window !== 'undefined' ? window.innerHeight : 844)
+  const safeTop = opts.safeTop ?? PAD
+  const safeBottom = opts.safeBottom ?? PAD
+  const { screen } = opts
+
+  let left = screen.midX - menuW / 2
+  left = Math.max(PAD, Math.min(left, vw - menuW - PAD))
+
+  const spaceAbove = screen.top - safeTop
+  const spaceBelow = vh - safeBottom - screen.bottom
+
+  let top: number
+  let placement: MenuPlacement
+
+  // 优先上方；上方放不下整条且下方更宽裕时改下方
+  if (spaceAbove >= menuH + GAP || spaceAbove >= spaceBelow) {
+    top = screen.top - menuH - GAP
+    placement = 'anchored-above'
+    if (top < safeTop) {
+      top = screen.bottom + GAP
+      placement = 'anchored-below'
+    }
+  } else {
+    top = screen.bottom + GAP
+    placement = 'anchored-below'
+    if (top + menuH > vh - safeBottom) {
+      top = Math.max(safeTop, screen.top - menuH - GAP)
+      placement = 'anchored-above'
+    }
+  }
+
+  top = Math.max(safeTop, Math.min(top, vh - menuH - safeBottom))
+  return { left, top, placement }
+}
+
+/**
+ * @deprecated 旧绝对定位；新逻辑用 placeSelectionBar
  */
 export function placeSelectionMenu(opts: {
   anchor: SelectionAnchor
@@ -100,37 +201,30 @@ export function placeSelectionMenu(opts: {
   menuW?: number
   menuH?: number
 }): MenuBox {
-  const menuW = opts.menuW ?? SELECTION_MENU_W
-  const menuH = opts.menuH ?? SELECTION_MENU_H
-  const { containerW, containerH, anchor } = opts
-
-  // 计算选区中心点
-  // 如果有多行，anchor.x 和 anchor.y 通常是第一行的。
-  // 为了美观，我们采用 anchor.x 减去可能的一半宽度？
-  // 注意：在 rangeToSelectionAnchor 中，anchor.x 已经是第一行的 center (left + width/2)
-  const selectionCenterX = anchor.x
-  const selectionTop = anchor.y
-  const selectionBottom = anchor.y + (anchor.height || 20)
-
-  // 默认水平居中对齐选中文字
+  const menuW = opts.menuW ?? SELECTION_BAR_W
+  const menuH = opts.menuH ?? SELECTION_BAR_H
+  if (opts.anchor.screen) {
+    return placeSelectionBar({
+      screen: opts.anchor.screen,
+      menuW,
+      menuH,
+      viewportW: opts.containerW,
+      viewportH: opts.containerH,
+    })
+  }
+  const selectionCenterX = opts.anchor.x
+  const selectionTop = opts.anchor.y
+  const selectionBottom = opts.anchor.endY ?? opts.anchor.y + (opts.anchor.height || 20)
   let left = selectionCenterX - menuW / 2
-  // 确保不溢出左右边界
-  left = Math.max(PAD, Math.min(left, containerW - menuW - PAD))
-
-  // 默认出现在选中文字的上方
+  left = Math.max(PAD, Math.min(left, opts.containerW - menuW - PAD))
   let top = selectionTop - menuH - GAP
   let placement: MenuPlacement = 'anchored-above'
-
-  // 如果上方空间不够，则尝试放到下方
   if (top < PAD) {
     top = selectionBottom + GAP
     placement = 'anchored-below'
-    
-    // 如果下方也不够，则强制约束在视口内（贴近顶部或底部）
-    if (top + menuH > containerH - PAD) {
-      top = Math.max(PAD, containerH - menuH - PAD)
+    if (top + menuH > opts.containerH - PAD) {
+      top = Math.max(PAD, opts.containerH - menuH - PAD)
     }
   }
-
   return { left, top, placement }
 }

@@ -5,6 +5,7 @@ import { BookOpenText, Download, Edit3, FolderInput, ImageUp, Search, Star, Tras
 import { motion } from 'framer-motion'
 import { api, ApiError, downloadUrl } from '../api/client'
 import type { BookDetail, Library, MetadataCandidate, MetadataSearchResponse } from '../api/types'
+import ConfirmDialog from '../components/ConfirmDialog'
 import Modal from '../components/Modal'
 import CoverTilt from '../components/CoverTilt'
 import { staggerContainer, staggerItem } from '../lib/motion'
@@ -107,7 +108,9 @@ export default function BookDetailPage() {
   return (
     <>
       <div className="topbar">
-        <div className="page-title">书籍详情</div>
+        <div className="page-heading">
+          <h1 className="page-title">书籍详情</h1>
+        </div>
       </div>
       <motion.div className="page-content" variants={staggerContainer} initial="initial" animate="animate">
         <div className="book-detail">
@@ -293,25 +296,19 @@ export default function BookDetailPage() {
         <MatchModal book={book} onClose={() => setShowMatch(false)} onApplied={() => { setShowMatch(false); load() }} />
       )}
       {showDelete && (
-        <Modal title="删除书籍" onClose={() => !deleting && setShowDelete(false)} width={420} closeOnBackdrop={!deleting}>
-          <div className="confirm-dialog">
-            <div className="confirm-dialog-lead">
+        <ConfirmDialog
+          title="删除书籍"
+          lead={
+            <>
               确认删除《<strong>{book.title}</strong>》？
-            </div>
-            <p className="confirm-dialog-desc">
-              将同时删除书库中的本地原文件，以及封面 / 转换副本。此操作不可撤销。
-            </p>
-            <div className="confirm-dialog-actions">
-              <button className="btn" type="button" disabled={deleting} onClick={() => setShowDelete(false)}>
-                取消
-              </button>
-              <button className="btn btn-danger" type="button" disabled={deleting} onClick={deleteBook}>
-                <Trash2 size={15} />
-                {deleting ? '删除中…' : '确认删除'}
-              </button>
-            </div>
-          </div>
-        </Modal>
+            </>
+          }
+          description="将同时删除书库中的本地原文件，以及封面 / 转换副本。此操作不可撤销。"
+          busy={deleting}
+          busyLabel="删除中…"
+          onClose={() => setShowDelete(false)}
+          onConfirm={deleteBook}
+        />
       )}
 
       {showMoveLibrary && (

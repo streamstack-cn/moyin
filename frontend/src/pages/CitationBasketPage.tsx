@@ -15,6 +15,8 @@ import { api, ApiError } from '../api/client'
 import type { CitationItem, CitationProject } from '../api/types'
 import ConfirmDialog from '../components/ConfirmDialog'
 import Modal from '../components/Modal'
+import { PageSeg, PageSegItem } from '../components/PageSeg'
+import { onMainResume } from '../lib/mainResume'
 
 interface PreviewFootnote {
   order: number
@@ -102,6 +104,19 @@ export default function CitationBasketPage() {
     loadProjects().finally(() => setLoading(false))
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
+
+  useEffect(() => {
+    return onMainResume(() => {
+      void loadProjects().then(() => {
+        if (activeProjectId) {
+          void loadItems()
+          void loadPreview()
+          void loadGroupOptions()
+        }
+      })
+    })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeProjectId])
 
   useEffect(() => {
     if (!activeProjectId) return
@@ -240,45 +255,51 @@ export default function CitationBasketPage() {
   return (
     <>
       <div className="topbar citation-topbar">
-        <div className="citation-topbar-heading">
-          <div className="page-title">引用篮</div>
-          <div className="page-subtitle">创建多个引用篮分组 · 读书时任选其一 · 预览中可逐条复制脚注与书目</div>
+        <div className="citation-topbar-heading page-heading">
+          <h1 className="page-title">引用篮</h1>
+          <p className="page-subtitle">创建多个引用篮分组 · 读书时任选其一 · 预览中可逐条复制脚注与书目</p>
         </div>
         <div className="citation-topbar-actions">
-          {activeProject && (
-            <button className="btn" onClick={() => askDeleteProject(activeProject.id)} title="删除当前引用篮">
-              <Trash2 size={16} />
-              <span className="btn-label-full">删除当前</span>
-              <span className="btn-label-short">删除</span>
-            </button>
-          )}
-          <button className="btn btn-primary" onClick={() => setShowNewProject(true)}>
-            <Plus size={16} />
-            <span className="btn-label-full">新建引用篮</span>
-            <span className="btn-label-short">新建</span>
-          </button>
+          <PageSeg aria-label="引用篮操作">
+            {activeProject && (
+              <PageSegItem
+                tone="danger"
+                icon={<Trash2 size={15} />}
+                label="删除当前"
+                shortLabel="删除"
+                title="删除当前引用篮"
+                onClick={() => askDeleteProject(activeProject.id)}
+              />
+            )}
+            <PageSegItem
+              primary
+              icon={<Plus size={15} />}
+              label="新建引用篮"
+              shortLabel="新建"
+              onClick={() => setShowNewProject(true)}
+            />
+          </PageSeg>
         </div>
       </div>
 
       <div className="page-content citation-page">
-        <div className="citation-project-bar" role="tablist" aria-label="引用篮">
+        <PageSeg className="citation-project-bar" role="tablist" aria-label="引用篮" wrap>
           {projects.map((p) => (
-            <button
+            <PageSegItem
               key={p.id}
-              type="button"
               role="tab"
               aria-selected={p.id === activeProjectId}
-              className={`citation-project-tab ${p.id === activeProjectId ? 'active' : ''}`}
+              active={p.id === activeProjectId}
+              label={p.name}
               onClick={() => setActiveProjectId(p.id)}
             >
-              <span>{p.name}</span>
               <span className="citation-project-count" aria-label={`${p.item_count ?? 0} 条引用`}>
                 {p.item_count ?? 0}
               </span>
-            </button>
+            </PageSegItem>
           ))}
           {projects.length === 0 && <span className="citation-project-empty">暂无引用篮</span>}
-        </div>
+        </PageSeg>
 
         {!activeProject ? (
           <div className="citation-empty-panel">
@@ -555,6 +576,7 @@ export default function CitationBasketPage() {
           }
           description="其中全部引用将一并删除，且不可恢复。"
           busy={deletingProject}
+          busyLabel="删除中…"
           onClose={() => !deletingProject && setPendingDelete(null)}
           onConfirm={confirmDeleteProject}
         />

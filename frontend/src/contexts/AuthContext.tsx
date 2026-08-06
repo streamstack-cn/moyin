@@ -1,6 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { api, clearToken, getToken, setToken, setUnauthorizedHandler } from '../api/client'
+import { writeLoginUICacheFromPreferences } from '../lib/loginUICache'
 
 export interface UserPreferences {
   theme?: 'dark' | 'light'
@@ -10,6 +11,20 @@ export interface UserPreferences {
   reader_font_size?: number
   /** PDF 缩放倍率 */
   reader_pdf_scale?: number
+  /** 划词松手后自动翻译（缺省 true） */
+  reader_auto_translate?: boolean
+  /** 界面配色方案（用户隔离） */
+  ui_color_scheme?: string
+  /** 界面字体 */
+  ui_font?: string
+  /** 阅读正文字体（与界面字体分离） */
+  reader_font_family?: string
+  /** 高级页面动画 */
+  ui_advanced_anim?: boolean
+  /** 登录页封面流动背景 */
+  ui_login_cover_flow?: boolean
+  /** 继续阅读：久未翻开时「请读完我」提示 */
+  ui_finish_nudge?: boolean
   [key: string]: unknown
 }
 
@@ -24,7 +39,7 @@ export interface CurrentUser {
 interface AuthContextValue {
   user: CurrentUser | null
   loading: boolean
-  login: (username: string, password: string) => Promise<void>
+  login: (username: string, password: string, rememberMe?: boolean) => Promise<void>
   logout: () => void
   updatePreferences: (partial: UserPreferences) => Promise<void>
 }
@@ -69,16 +84,26 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return () => setUnauthorizedHandler(null)
   }, [navigate])
 
-  const login = useCallback(async (username: string, password: string) => {
-    const resp = await api.post<{ token: string; user: CurrentUser }>('/api/auth/login', { username, password })
-    setToken(resp.token)
+  const login = useCallback(async (username: string, password: string, rememberMe = true) => {
+    const resp = await api.post<{ token: string; user: CurrentUser; remember_me?: boolean }>(
+      '/api/auth/login',
+      { username, password, remember_me: rememberMe },
+    )
+    setToken(resp.token, rememberMe)
+    // 立刻把账号界面偏好写入登录页缓存，下次未登录也能用
+    writeLoginUICacheFromPreferences(resp.user.preferences as Record<string, unknown>)
     setUser(resp.user)
   }, [])
 
   const logout = useCallback(() => {
+    // 登出前合并写入账号偏好；缺字段时保留本机已写入的设置（改设置时 commitLocal 已落盘）
+    // 切勿用「缺 key → 默认开封面/默认配色」覆盖，否则关闭封面/翡翠绿会在登录页失效
+    if (user?.preferences) {
+      writeLoginUICacheFromPreferences(user.preferences as Record<string, unknown>)
+    }
     clearToken()
     setUser(null)
-  }, [])
+  }, [user])
 
   // 账号级偏好（主题、阅读器背景/高亮等）：登录后随账号同步，避免多用户共用同一设备/浏览器时
   // 互相覆盖对方基于 localStorage 的界面设置。乐观更新本地状态，后端保存失败不阻塞交互。

@@ -7,19 +7,21 @@ import { toast } from 'sonner'
 import ReactMarkdown from 'react-markdown'
 import React from 'react'
 import { useNavigate } from 'react-router-dom'
-import { api } from '../api/client'
+import { api, getToken } from '../api/client'
 import type {
   AiConfig, AiMaterial, AiReport, AiReportContent, AiProvider, AiReaderBook, AiPortrait,
 } from '../api/types'
 import Modal from '../components/Modal'
 import ConfirmDialog from '../components/ConfirmDialog'
+import LabSwitch from '../components/LabSwitch'
+import { PageSeg, PageSegItem } from '../components/PageSeg'
 
 // ── 工具 ──────────────────────────────────────────────────────────────────────
 const BASE_URL = import.meta.env.VITE_API_BASE_URL || ''
 
 function coverSrc(url?: string) {
   if (!url) return ''
-  return url.startsWith('http') ? url : `${BASE_URL}${url}?_t=${localStorage.getItem('moyin_token') || ''}`
+  return url.startsWith('http') ? url : `${BASE_URL}${url}?_t=${getToken() || ''}`
 }
 
 /** 根据 base_url 反查服务商展示名，用于提示"当前保存的 Key 属于哪个服务商" */
@@ -121,23 +123,6 @@ function PickCircle({ checked }: { checked: boolean }) {
         />
       </motion.svg>
     </span>
-  )
-}
-
-// ── 微组件：拟真拨钮开关（用于「包含全文原文」等布尔配置）───────────────────
-
-function TactileToggle({ checked, onChange, label }: { checked: boolean; onChange: (v: boolean) => void; label?: string }) {
-  return (
-    <button
-      type="button"
-      role="switch"
-      aria-checked={checked}
-      aria-label={label}
-      className={`ai-tactile-toggle${checked ? ' on' : ''}`}
-      onClick={() => onChange(!checked)}
-    >
-      <motion.span className="ai-tactile-knob" layout transition={{ type: 'spring', stiffness: 520, damping: 32 }} />
-    </button>
   )
 }
 
@@ -1130,7 +1115,7 @@ function AiReaderPage() {
     setStreamedChars(0)
     setReport(null)
     setMobileTab('report')
-    const token = localStorage.getItem('moyin_token') || ''
+    const token = getToken() || ''
     const controller = new AbortController()
     streamAbortRef.current = controller
     try {
@@ -1229,44 +1214,69 @@ function AiReaderPage() {
 
   return (
     <>
-      <div className="topbar">
-        <div style={{ display: 'flex', flexDirection: 'column' }}>
-          <div className="page-title text-gradient-accent" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <Lightbulb size={20} style={{ color: 'var(--accent)' }} /> AI 伴读
+      <div className="topbar ai-reader-topbar">
+        <div className="page-heading">
+          <div className="page-title-row">
+            <Lightbulb size={20} className="page-title-icon" aria-hidden />
+            <h1 className="page-title">AI 伴读</h1>
           </div>
-          <div className="page-subtitle">基于你的高亮、笔记与引用，生成专属阅读报告并可继续追问</div>
+          <p className="page-subtitle">基于你的高亮、笔记与引用，生成专属阅读报告并可继续追问</p>
         </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <button type="button" className="btn btn-sm" onClick={() => setShowSettings(true)}>
-            <Settings size={13} /> 设置
-          </button>
-        </div>
+        {/* 桌面：设置留在顶栏；移动端改到下方工具条与分区标签对齐 */}
+        <PageSeg className="ai-reader-settings-desktop" aria-label="AI 伴读操作">
+          <PageSegItem
+            icon={<Settings size={14} />}
+            label="设置"
+            onClick={() => setShowSettings(true)}
+          />
+        </PageSeg>
       </div>
 
       <div className="page-content aurora-bg ai-reader-page-content">
-        <div className="ai-reader-mobile-tabs">
-          <button type="button" className={`tab-btn ${mobileTab === 'books' ? 'active' : ''}`} onClick={() => setMobileTab('books')}>
-            选书
-          </button>
-          <button type="button" className={`tab-btn ${mobileTab === 'material' ? 'active' : ''}`} onClick={() => setMobileTab('material')}>
-            素材
-          </button>
-          <button type="button" className={`tab-btn ${mobileTab === 'report' ? 'active' : ''}`} onClick={() => setMobileTab('report')}>
-            报告
-          </button>
+        <div className="ai-reader-mobile-toolbar">
+          <PageSeg className="ai-reader-mobile-tabs" role="tablist" aria-label="伴读分区">
+            <PageSegItem
+              role="tab"
+              aria-selected={mobileTab === 'books'}
+              active={mobileTab === 'books'}
+              label="选书"
+              onClick={() => setMobileTab('books')}
+            />
+            <PageSegItem
+              role="tab"
+              aria-selected={mobileTab === 'material'}
+              active={mobileTab === 'material'}
+              label="素材"
+              onClick={() => setMobileTab('material')}
+            />
+            <PageSegItem
+              role="tab"
+              aria-selected={mobileTab === 'report'}
+              active={mobileTab === 'report'}
+              label="报告"
+              onClick={() => setMobileTab('report')}
+            />
+          </PageSeg>
+          <PageSeg className="ai-reader-settings-mobile" aria-label="AI 伴读操作">
+            <PageSegItem
+              icon={<Settings size={14} />}
+              label="设置"
+              shortLabel="设置"
+              onClick={() => setShowSettings(true)}
+            />
+          </PageSeg>
         </div>
         <div className="ai-reader-layout">
           {/* 左侧：书籍列表 */}
-          <div className={`ai-reader-col-books glass-panel ${mobileTab === 'books' ? 'mobile-visible' : ''}`} style={{ padding: 16 }}>
-            <div className="section-title">
+          <div className={`ai-reader-col-books glass-panel ${mobileTab === 'books' ? 'mobile-visible' : ''}`}>
+            <div className="section-title ai-col-section-title">
               <BookOpen size={15} /> 选读资料
             </div>
             <input
-              className="search-input"
+              className="search-input ai-book-search"
               placeholder="搜索库中书籍…"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              style={{ marginBottom: 14 }}
             />
             <div className="ai-book-list">
               {loadingBooks ? (
@@ -1280,8 +1290,8 @@ function AiReaderPage() {
           </div>
 
           {/* 中间：书籍素材 */}
-          <div className={`ai-reader-col-material glass-panel ${mobileTab === 'material' ? 'mobile-visible' : ''}`} style={{ padding: 16 }}>
-            <div className="section-title">
+          <div className={`ai-reader-col-material glass-panel ${mobileTab === 'material' ? 'mobile-visible' : ''}`}>
+            <div className="section-title ai-col-section-title">
               <FileText size={15} /> 关联素材
             </div>
             {!!selectedIds.length && (
@@ -1292,10 +1302,10 @@ function AiReaderPage() {
                     默认关闭：报告以你的高亮/笔记/引用为主，素材不足时才自动补充背景；打开后无论素材多少都会额外附上原文，更慢、更耗 Token
                   </div>
                 </div>
-                <TactileToggle checked={includeFullText} onChange={setIncludeFullText} label="强制附带原文全文" />
+                <LabSwitch checked={includeFullText} onChange={setIncludeFullText} />
               </div>
             )}
-            <div style={{ flex: 1, overflowY: 'auto', paddingRight: 4, minHeight: 0 }}>
+            <div className="ai-reader-col-scroll">
               <MaterialPanel
                 materials={materials}
                 excludedIds={excludedMaterialIds}
@@ -1312,7 +1322,7 @@ function AiReaderPage() {
           </div>
 
           {/* 右侧：生成与报告 */}
-          <div className={`ai-reader-col-report glass-panel ${mobileTab === 'report' ? 'mobile-visible' : ''}`} style={{ padding: 16 }}>
+          <div className={`ai-reader-col-report glass-panel ${mobileTab === 'report' ? 'mobile-visible' : ''}`}>
             <div className="section-title ai-report-head">
               <div className="ai-report-head-title">
                 <Bot size={15} /> <span className="ai-report-head-title-text">伴读助手</span>
@@ -1323,22 +1333,34 @@ function AiReaderPage() {
                 )}
               </div>
               <div className="ai-report-head-actions">
-                <button type="button" className="btn btn-sm" onClick={() => setShowHistory(true)}>
-                  <History size={13} /> 历史
-                </button>
-                {streaming ? (
-                  <button type="button" className="ai-generate-btn ai-generate-btn-stop" onClick={stopGenerating}>
-                    <Square size={12} fill="currentColor" /> 停止生成
-                  </button>
-                ) : (
-                  <button type="button" className="ai-generate-btn" onClick={() => generateReport(true)} disabled={!selectedIds.length}>
-                    <Sparkles size={13} /> 生成伴读报告
-                  </button>
-                )}
+                <PageSeg aria-label="报告操作">
+                  <PageSegItem
+                    icon={<History size={13} />}
+                    label="历史"
+                    onClick={() => setShowHistory(true)}
+                  />
+                  {streaming ? (
+                    <PageSegItem
+                      tone="danger"
+                      primary
+                      icon={<Square size={12} fill="currentColor" />}
+                      label="停止生成"
+                      onClick={stopGenerating}
+                    />
+                  ) : (
+                    <PageSegItem
+                      primary
+                      icon={<Sparkles size={13} />}
+                      label="生成伴读报告"
+                      onClick={() => generateReport(true)}
+                      disabled={!selectedIds.length}
+                    />
+                  )}
+                </PageSeg>
               </div>
             </div>
 
-            <div style={{ flex: 1, overflowY: 'auto', paddingRight: 4, minHeight: 0 }}>
+            <div className="ai-reader-col-scroll">
               {!streaming && !report && !selectedIds.length && (
                 <div className="empty-state" style={{ minHeight: 220 }}>
                   <p style={{ marginTop: 8 }}>选择书籍后点击「生成伴读报告」</p>
@@ -1432,6 +1454,7 @@ function AiReaderPage() {
           lead="确定删除该阅读报告吗？"
           description="删除后无法恢复，需要重新生成。"
           busy={deletingReport}
+          busyLabel="删除中…"
           onClose={() => !deletingReport && setDeleteReportId(null)}
           onConfirm={confirmDeleteHistoryReport}
         />

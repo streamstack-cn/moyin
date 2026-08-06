@@ -25,7 +25,9 @@ import AnimatedNumber from '../components/AnimatedNumber'
 import BookCard from '../components/BookCard'
 import ConfirmDialog from '../components/ConfirmDialog'
 import Modal from '../components/Modal'
+import NeonCheckbox from '../components/NeonCheckbox'
 import MotionGrid from '../components/MotionGrid'
+import { PageSeg, PageSegItem } from '../components/PageSeg'
 import { useAuth } from '../contexts/AuthContext'
 import { trackGlow } from '../lib/glowTrack'
 import { bumpRecommendOffset, pickRecommendedBooks } from '../lib/recommendedBooks'
@@ -571,6 +573,14 @@ export default function LibraryPage() {
     if (metaFilter === 'missing_douban') saveBatchSelection(selectedIds)
   }, [selectedIds, metaFilter])
 
+  // 读者账号不可见「缺少信息」；若带了 meta=missing_douban 则清掉
+  useEffect(() => {
+    if (user?.role === 'admin') return
+    if (metaFilter !== 'missing_douban') return
+    setMetaFilter('')
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user?.role, metaFilter])
+
   useEffect(() => {
     if (user?.role !== 'admin') return
     let cancelled = false
@@ -659,51 +669,57 @@ export default function LibraryPage() {
   return (
     <>
       <div className="topbar library-topbar">
-        <div className="library-topbar-heading">
-          <div className="page-title text-gradient-accent">我的书库</div>
-          <div className="page-subtitle">按书架与标签浏览 · 标注 · 沉淀写作引用</div>
+        <div className="library-topbar-heading page-heading">
+          <h1 className="page-title">我的书库</h1>
+          <p className="page-subtitle">按书架与标签浏览 · 标注 · 沉淀写作引用</p>
         </div>
         <div className="library-topbar-actions">
-          {user?.role === 'admin' && (
-            <>
-              <button className="btn" onClick={scanAllLibraries} disabled={scanningAll || scanBusy} title="扫描全部书库目录并同步增删">
-                <RefreshCw size={16} className={scanningAll || scanBusy ? 'spin' : undefined} />
-                <span className="btn-label-full">{scanningAll || scanBusy ? '扫描中…' : '扫描书库'}</span>
-                <span className="btn-label-short">{scanningAll || scanBusy ? '扫描中' : '扫描'}</span>
-              </button>
-              {(scanBusy || stoppingScan) && (
-                <button
-                  className="btn btn-danger"
-                  onClick={stopScan}
-                  disabled={stoppingScan}
-                  title="立刻清空排队并中止当前扫描，避免大库继续入库"
-                >
-                  <span className="btn-label-full">{stoppingScan ? '停止中…' : '停止扫描'}</span>
-                  <span className="btn-label-short">{stoppingScan ? '停止中' : '停止'}</span>
-                </button>
-              )}
-              <button className="btn" onClick={() => setShowLibraryModal(true)} title="管理书库目录">
-                <FolderPlus size={16} />
-                <span className="btn-label-full">管理书库目录</span>
-                <span className="btn-label-short">目录</span>
-              </button>
-            </>
-          )}
-          <button
-            className="btn btn-primary"
-            onClick={() => {
-              setUploadFile(null)
-              setUploadLibraryId(
-                activeLibrary && activeLibrary !== '__none__' ? activeLibrary : '__none__',
-              )
-              setShowUploadModal(true)
-            }}
-            title="上传电子书（入库后全员可见）"
-          >
-            <UploadCloud size={16} />
-            <span className="btn-label-full">上传电子书</span>
-            <span className="btn-label-short">上传</span>
-          </button>
+          <PageSeg aria-label="书库操作">
+            {user?.role === 'admin' && (
+              <>
+                <PageSegItem
+                  icon={<RefreshCw size={15} className={scanningAll || scanBusy ? 'spin' : undefined} />}
+                  label={scanningAll || scanBusy ? '扫描中…' : '扫描书库'}
+                  shortLabel={scanningAll || scanBusy ? '扫描中' : '扫描'}
+                  onClick={scanAllLibraries}
+                  disabled={scanningAll || scanBusy}
+                  title="扫描全部书库目录并同步增删"
+                />
+                {(scanBusy || stoppingScan) && (
+                  <PageSegItem
+                    tone="danger"
+                    primary
+                    label={stoppingScan ? '停止中…' : '停止扫描'}
+                    shortLabel={stoppingScan ? '停止中' : '停止'}
+                    onClick={stopScan}
+                    disabled={stoppingScan}
+                    title="立刻清空排队并中止当前扫描，避免大库继续入库"
+                  />
+                )}
+                <PageSegItem
+                  icon={<FolderPlus size={15} />}
+                  label="管理书库目录"
+                  shortLabel="目录"
+                  onClick={() => setShowLibraryModal(true)}
+                  title="管理书库目录"
+                />
+              </>
+            )}
+            <PageSegItem
+              primary
+              icon={<UploadCloud size={15} />}
+              label="上传电子书"
+              shortLabel="上传"
+              title="上传电子书（入库后全员可见）"
+              onClick={() => {
+                setUploadFile(null)
+                setUploadLibraryId(
+                  activeLibrary && activeLibrary !== '__none__' ? activeLibrary : '__none__',
+                )
+                setShowUploadModal(true)
+              }}
+            />
+          </PageSeg>
           <input
             ref={fileInputRef}
             type="file"
@@ -796,19 +812,19 @@ export default function LibraryPage() {
                   if (uploadLibraryId && uploadLibraryId !== '__none__') {
                     formData.append('library_id', uploadLibraryId)
                   }
-                  const tId = toast.loading(`正在导入《${uploadFile.name}》…`)
+                  // 弹窗内已有进度区，不再额外 toast.loading，避免与弹窗叠两层
                   try {
                     await api.upload('/api/books/upload', formData)
                     const shelf =
                       uploadLibraryId === '__none__'
                         ? '未归架'
                         : libraries.find((l) => l.id === uploadLibraryId)?.name || '目标书架'
-                    toast.success(`导入成功 · ${shelf}`, { id: tId })
+                    toast.success(`导入成功 · ${shelf}`)
                     setShowUploadModal(false)
                     setUploadFile(null)
                     refresh()
                   } catch (err) {
-                    toast.error(err instanceof ApiError ? err.message : '导入失败', { id: tId })
+                    toast.error(err instanceof ApiError ? err.message : '导入失败')
                   } finally {
                     setUploading(false)
                   }
@@ -859,17 +875,19 @@ export default function LibraryPage() {
               <AnimatedNumber value={stats?.favorites} />
             </span>
           </button>
-          <button
-            type="button"
-            className={`stat-strip-item clickable${metaFilter === 'missing_douban' ? ' active' : ''}`}
-            onClick={() => setMetaFilter(metaFilter === 'missing_douban' ? '' : 'missing_douban')}
-            title="查看缺少信息的书，点开可手动编辑或匹配豆瓣"
-          >
-            <span className="stat-strip-label">缺少信息</span>
-            <span className="stat-strip-value">
-              <AnimatedNumber value={stats?.missing_douban} />
-            </span>
-          </button>
+          {user?.role === 'admin' && (
+            <button
+              type="button"
+              className={`stat-strip-item clickable${metaFilter === 'missing_douban' ? ' active' : ''}`}
+              onClick={() => setMetaFilter(metaFilter === 'missing_douban' ? '' : 'missing_douban')}
+              title="查看缺少信息的书，点开可手动编辑或匹配豆瓣"
+            >
+              <span className="stat-strip-label">缺少信息</span>
+              <span className="stat-strip-value">
+                <AnimatedNumber value={stats?.missing_douban} />
+              </span>
+            </button>
+          )}
         </div>
 
         {metaFilter === 'favorited' && (
@@ -949,7 +967,7 @@ export default function LibraryPage() {
 
         <div className="toolbar library-toolbar">
           <div className="search-box" onMouseMove={trackGlow}>
-            <Search size={16} />
+            <Search size={16} className="search-box-icon" aria-hidden />
             <input className="input" placeholder="按书名 / 作者 / ISBN 搜索…" value={q} onChange={(e) => setQ(e.target.value)} />
           </div>
           <select className="input" style={{ width: 140 }} value={status} onChange={(e) => setStatus(e.target.value)}>
@@ -970,35 +988,30 @@ export default function LibraryPage() {
             <option value="rating_desc">评分从高到低</option>
             <option value="title">书名 A-Z</option>
           </select>
-          <div className="library-view-switch" role="group" aria-label="排版方式">
-            <button
-              type="button"
-              className={groupMode === 'shelf' ? 'active' : ''}
+          <PageSeg className="library-view-switch" role="group" aria-label="排版方式">
+            <PageSegItem
+              icon={<Layers size={14} />}
+              label="书架"
+              active={groupMode === 'shelf'}
               onClick={() => setGroupMode('shelf')}
               title="按书架分组"
-            >
-              <Layers size={14} />
-              书架
-            </button>
-            <button
-              type="button"
-              className={`library-view-tag ${groupMode === 'tag' ? 'active' : ''}`}
+            />
+            <PageSegItem
+              className="library-view-tag"
+              icon={<Tags size={14} />}
+              label="标签"
+              active={groupMode === 'tag'}
               onClick={() => setGroupMode('tag')}
               title="按标签分组"
-            >
-              <Tags size={14} />
-              标签
-            </button>
-            <button
-              type="button"
-              className={groupMode === 'flat' ? 'active' : ''}
+            />
+            <PageSegItem
+              icon={<LayoutGrid size={14} />}
+              label="平铺"
+              active={groupMode === 'flat'}
               onClick={() => setGroupMode('flat')}
               title="平铺全部"
-            >
-              <LayoutGrid size={14} />
-              平铺
-            </button>
-          </div>
+            />
+          </PageSeg>
         </div>
 
         {libraries.length > 0 && (
@@ -1050,7 +1063,7 @@ export default function LibraryPage() {
         {showRecommended && (
           <section className="home-section library-recommend-section">
             <div className="home-section-header">
-              <div className="home-section-title library-recommend-title">高分推荐</div>
+              <div className="home-section-title">高分推荐</div>
               {recommendPool.length > visibleRecommended.length && (
                 <button type="button" className="btn btn-sm library-recommend-shuffle" onClick={shuffleRecommended}>
                   <RefreshCw size={13} /> 换一批
@@ -1696,10 +1709,13 @@ function LibraryModal({
         />
       )}
 
-      <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, marginTop: 12 }}>
-        <input type="checkbox" checked={watchOnCreate} onChange={(e) => setWatchOnCreate(e.target.checked)} />
-        开启目录变动自动刷新（默认关闭；大库勿开，避免自动扫入新书）
-      </label>
+      <div style={{ marginTop: 12 }}>
+        <NeonCheckbox
+          checked={watchOnCreate}
+          onChange={setWatchOnCreate}
+          label="开启目录变动自动刷新（默认关闭；大库勿开，避免自动扫入新书）"
+        />
+      </div>
 
       <button className="btn btn-primary" style={{ width: '100%', justifyContent: 'center', marginTop: 14 }} onClick={createLibrary} disabled={busy}>
         {busy ? '添加中…' : '添加书架'}
@@ -1716,6 +1732,7 @@ function LibraryModal({
         }
         description="不会删除已入库的书籍，仅解除目录关联。"
         busy={deletingLibrary}
+        busyLabel="删除中…"
         onClose={() => !deletingLibrary && setPendingDelete(null)}
         onConfirm={confirmDeleteLibrary}
       />

@@ -56,15 +56,16 @@ export const inkRevealVariants: Variants = {
  * 还可能和 overflow 叠在一起偶发整页不显示。
  */
 export const mobilePageVariants: Variants = {
-  initial: { opacity: 0, y: 10 },
+  initial: { opacity: 0, y: 8 },
   animate: {
     opacity: 1,
     y: 0,
-    transition: { duration: 0.22, ease: easeOutExpo },
+    transition: { duration: 0.28, ease: easeOutExpo },
   },
   exit: {
     opacity: 0,
-    transition: { duration: 0.12, ease: easeInInk },
+    y: -4,
+    transition: { duration: 0.16, ease: easeInInk },
   },
 }
 

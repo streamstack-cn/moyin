@@ -1,15 +1,23 @@
 const TOKEN_KEY = 'moyin_token'
 
+/** 优先 localStorage（保持登录），否则 sessionStorage（关闭标签/浏览器即失效） */
 export function getToken(): string | null {
-  return localStorage.getItem(TOKEN_KEY)
+  return localStorage.getItem(TOKEN_KEY) || sessionStorage.getItem(TOKEN_KEY)
 }
 
-export function setToken(token: string) {
-  localStorage.setItem(TOKEN_KEY, token)
+export function setToken(token: string, rememberMe = true) {
+  if (rememberMe) {
+    localStorage.setItem(TOKEN_KEY, token)
+    sessionStorage.removeItem(TOKEN_KEY)
+  } else {
+    sessionStorage.setItem(TOKEN_KEY, token)
+    localStorage.removeItem(TOKEN_KEY)
+  }
 }
 
 export function clearToken() {
   localStorage.removeItem(TOKEN_KEY)
+  sessionStorage.removeItem(TOKEN_KEY)
 }
 
 /** 带 token 的请求收到 401 时回调（由 AuthProvider 注册，跳转登录） */

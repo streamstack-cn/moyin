@@ -40,3 +40,9 @@ scratch_import_keys.py
 # Playwright
 frontend/test-results/
 frontend/playwright-report/
+frontend/e2e/
+
+# 本地/代理工作笔记（不上传仓库）
+docs/superpowers/
+.cursor/
+**/agent-transcripts/

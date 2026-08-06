@@ -28,6 +28,7 @@ import ReaderJournalPanel from '../components/ReaderJournalPanel'
 import ReaderReturnOriginBar from '../components/ReaderReturnOriginBar'
 import ReaderTranslatePanel from '../components/ReaderTranslatePanel'
 import ReaderMidSwipeLayer from '../components/ReaderMidSwipeLayer'
+import ReaderProgressJump from '../components/ReaderProgressJump'
 import SelectionBubble from '../components/SelectionBubble'
 import { useAuth } from '../contexts/AuthContext'
 import { usePinchZoom } from '../hooks/usePinchZoom'
@@ -1772,24 +1773,13 @@ export default function PdfReaderPage({ book }: Props) {
 
   function renderProgressJump() {
     return (
-      <div className="reader-progress-jump" title="输入页码后回车跳转">
-        <input
-          className="reader-page-input"
-          value={pageInput}
-          onChange={(e) => setPageInput(e.target.value.replace(/[^\d]/g, ''))}
-          onBlur={() => jumpToPage()}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter') {
-              e.currentTarget.blur()
-              jumpToPage(e.currentTarget.value)
-            }
-          }}
-          aria-label="跳转到页码"
-        />
-        <span className="reader-progress-meta">
-          / {totalPages || '…'} · {percent}%
-        </span>
-      </div>
+      <ReaderProgressJump
+        pageInput={pageInput}
+        totalLabel={totalPages ? String(totalPages) : '…'}
+        percent={percent}
+        onPageInputChange={setPageInput}
+        onJump={(raw) => jumpToPage(raw)}
+      />
     )
   }
 

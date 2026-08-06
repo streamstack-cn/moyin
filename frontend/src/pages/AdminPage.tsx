@@ -1154,11 +1154,11 @@ function SystemPanel() {
             }
           />
           <InfoLine
-            label="Word 真脚注导出"
+            label="LibreOffice（可选）"
             value={
               status.libreoffice_available
-                ? '可用'
-                : '不可用：导出脚注将改为编号列表'
+                ? '可用：支持将脚注转为 Word 真脚注文件'
+                : '未安装：日常以引用篮「预览复制」为主；Word 文件导出将降级为编号列表'
             }
           />
           <InfoLine label="PDF 在线阅读" value={status.pdf_readable ? '可用' : '不可用'} />

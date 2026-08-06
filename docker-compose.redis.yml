@@ -1,9 +1,6 @@
 # 墨引 MoYin — 标准版（含 Redis：元数据缓存 / 登录限流）
-# 安装：
-#   mkdir -p moyin/config moyin/redis && cd moyin
-#   curl -fsSL -o docker-compose.yml https://raw.githubusercontent.com/streamstack-cn/moyin/main/docker-compose.redis.yml
-#   docker compose up -d
-# 访问前端：http://<主机IP>:6173
+# 使用：mkdir -p config redis && 保存为 docker-compose.yml 后 docker compose up -d
+# 访问：http://<主机IP>:6173   首次登录 admin / change_me
 
 services:
   redis:
@@ -12,7 +9,6 @@ services:
     restart: unless-stopped
     command: redis-server --requirepass change_me_redis --appendonly yes
     volumes:
-      # 绑定宿主机目录（可改成绝对路径，例如 /data/moyin-redis:/data）
       - ./redis:/data
 
   moyin:
@@ -24,16 +20,12 @@ services:
     ports:
       - "6173:6173"
     volumes:
-      # 全部应用数据（数据库/封面/转换文件）。勿删、换目录启动等于新库
       - ./config:/config
-      # 电子书源目录（读写）→ 容器内固定 /library-source（默认根路径，可省略 MOYIN_LIBRARY_ROOT）
-      # - /path/to/your/ebooks:/library-source
+      # 【请改】左侧换成你的电子书目录，不要加 :ro
+      - /path/to/your/ebooks:/library-source
     environment:
       ADMIN_USERNAME: admin
-      ADMIN_PASSWORD: change_me          # 仅首次（config 内尚无用户）生效
-      MOYIN_SECRET_KEY: change_me_secret # 登录 JWT 密钥（不是 API Key）；请改成随机长串
-      # 密码须与上方 redis 服务 --requirepass 一致
+      ADMIN_PASSWORD: change_me          # 【请修改】仅首次建库生效
+      MOYIN_SECRET_KEY: change_me_secret # 【请修改】随机长字符串
+      # 密码须与上方 --requirepass 一致
       REDIS_URL: redis://:change_me_redis@redis:6379/0
-      # 若改用局域网已有 Redis，可删掉上方 redis 服务，改为例如：
-      # REDIS_URL: redis://:password@192.168.0.101:6379/2
-

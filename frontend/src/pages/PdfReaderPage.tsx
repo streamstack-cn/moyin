@@ -42,6 +42,7 @@ import {
 import { isAppleTouchDevice } from '../lib/platform'
 import { isReaderPinchBlocking, markTouchGestureMulti } from '../lib/readerGestureGate'
 import { copyTextToClipboard } from '../lib/clipboard'
+import { pickDefaultBasketProjectId } from '../lib/citationBasket'
 import { BASKET_PROJECT_KEY, type SelectionAnchor } from '../lib/readerConstants'
 import { useJournalDrawerWidth } from '../lib/useJournalDrawerWidth'
 import {
@@ -53,6 +54,11 @@ import {
   selectionToPdfLocator,
   type RelativeRect,
 } from '../lib/pdfLocator'
+import {
+  noTextHintDismissKey,
+  noTextToastKey,
+  pageHasSelectableText,
+} from '../lib/pdfTextLayer'
 import { findKeywordRanges } from '../lib/findKeywordRanges'
 import { highlightTerms } from '../lib/highlightQuery'
 import {
@@ -97,28 +103,6 @@ function ensurePdfWorker(): Promise<void> {
   return pdfWorkerReady
 }
 
-/** 扫描版/纯图页通常没有有效文字层；过短的空白/页码噪声不算可选文字 */
-function pageHasSelectableText(items: unknown[] | undefined): boolean {
-  let chars = 0
-  for (const it of items || []) {
-    if (!it || typeof it !== 'object' || !('str' in it)) continue
-    const raw = (it as { str?: unknown }).str
-    if (typeof raw !== 'string') continue
-    const s = raw.replace(/[\u200b\u200c\u200d\ufeff]/g, '').trim()
-    chars += s.length
-    if (chars >= 2) return true
-  }
-  return false
-}
-
-function noTextHintDismissKey(bookId: string) {
-  return `moyin_pdf_notext_hint_dismiss_${bookId}`
-}
-
-function noTextToastKey(bookId: string) {
-  return `moyin_pdf_notext_toast_${bookId}`
-}
-
 interface Props {
   book: BookDetail
 }
@@ -139,16 +123,6 @@ interface HlPaint {
   id: string
   color: string
   rects: RelativeRect[]
-}
-
-function pickDefaultBasketProjectId(projects: CitationProject[]): string {
-  try {
-    const saved = localStorage.getItem(BASKET_PROJECT_KEY)
-    if (saved && projects.some((p) => p.id === saved)) return saved
-  } catch {
-    /* private mode */
-  }
-  return projects.find((p) => p.name === '默认引用篮')?.id || projects[0]?.id || ''
 }
 
 /** PDF 阅读器：pdf.js canvas + TextLayer 选区 + 软高亮 + 功能气泡（引用/脚注） */

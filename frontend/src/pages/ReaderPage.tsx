@@ -26,7 +26,7 @@ import {
   X,
 } from 'lucide-react'
 import { api, ApiError, getToken } from '../api/client'
-import type { BookDetail, BookNote, CitationProject, Highlight } from '../api/types'
+import type { BookDetail, BookNote, Highlight } from '../api/types'
 import LabSwitch from '../components/LabSwitch'
 import ReaderBookIdentity from '../components/ReaderBookIdentity'
 import ReaderJournalPanel from '../components/ReaderJournalPanel'
@@ -48,7 +48,11 @@ import {
 } from '../lib/readerFonts'
 import { copyTextToClipboard } from '../lib/clipboard'
 import { isAppleTouchDevice } from '../lib/platform'
-import { pickDefaultBasketProjectId } from '../lib/citationBasket'
+import { useReaderAnnotateMode } from '../hooks/useReaderAnnotateMode'
+import {
+  epubCitationSuccessToast,
+  useReaderCitationBasket,
+} from '../hooks/useReaderCitationBasket'
 import {
   EPUB_LOC_CHARS,
   findChapterTitle,
@@ -57,7 +61,8 @@ import {
   loadCachedEpubLocations,
   saveCachedEpubLocations,
 } from '../lib/epubNav'
-import { BASKET_PROJECT_KEY, type SelectionAnchor } from '../lib/readerConstants'
+import { type SelectionAnchor } from '../lib/readerConstants'
+import { epubPersistableLocator } from '../lib/readerSelection'
 import {
   clearDomSelection,
   isAccidentalTapSelection,
@@ -168,11 +173,9 @@ function EpubReaderPage({ bookId }: { bookId: string }) {
   const [book, setBook] = useState<BookDetail | null>(null)
   const [toc, setToc] = useState<NavItem[]>([])
   const [highlights, setHighlights] = useState<Highlight[]>([])
-  const [projects, setProjects] = useState<CitationProject[]>([])
   const [drawerTab, setDrawerTab] = useState<DrawerTab>(null)
   const [selection, setSelection] = useState<SelectionState | null>(null)
   const [activeHighlight, setActiveHighlight] = useState<ActiveHighlightState | null>(null)
-  const [basketProjectId, setBasketProjectId] = useState('')
   const [chromeVisible, setChromeVisible] = useState(true)
   const chromeVisibleRef = useRef(true)
   /** 关抽屉后短暂锁定，避免点击穿透把顶底栏又藏掉 */
@@ -197,7 +200,6 @@ function EpubReaderPage({ bookId }: { bookId: string }) {
   const pointerStartRef = useRef<{ x: number; y: number } | null>(null)
   const pointerMovePxRef = useRef(0)
   const viewerWrapRef = useRef<HTMLDivElement | null>(null)
-  const [basketPage, setBasketPage] = useState('')
   const [percent, setPercent] = useState(0)
   const [currentPage, setCurrentPage] = useState(1)
   const [totalPages, setTotalPages] = useState(0)
@@ -214,9 +216,6 @@ function EpubReaderPage({ bookId }: { bookId: string }) {
   const lastWheelAtRef = useRef(0)
   const { user, updatePreferences } = useAuth()
   const { readerFont, setReaderFont } = useUISettings()
-  /** 移动端划词模式：卸掉中部滑动层，便于选字 */
-  const [midSelectMode, setMidSelectMode] = useState(false)
-  const midSelectPinnedRef = useRef(false)
   /** 移动端从任意 EPUB contents 尝试弹出 Sheet（供轮询兜底） */
   const mobilePresentRef = useRef<() => boolean>(() => false)
   /** 同步 DOM 选区全文到底栏 / 无选区则关闭 */
@@ -247,6 +246,36 @@ function EpubReaderPage({ bookId }: { bookId: string }) {
       window.matchMedia('(pointer: coarse)').matches
     )
   })
+  const basketPageRef = useRef('')
+  const {
+    projects,
+    basketProjectId,
+    setBasketProjectId,
+    basketPage,
+    setBasketPage,
+    loadProjects,
+    addToBasket: addToBasketCore,
+    addToNewBasket: addToNewBasketCore,
+    copyQuickFootnote,
+  } = useReaderCitationBasket({
+    bookId,
+    resolvePageNo: () => basketPageRef.current,
+    successToast: (pageNo) => epubCitationSuccessToast(pageNo, pageSourceRef.current),
+  })
+  useEffect(() => {
+    basketPageRef.current = basketPage
+  }, [basketPage])
+  const {
+    midSelectMode,
+    setMidSelectMode,
+    midSelectPinnedRef,
+    enterAnnotateMode,
+    toggleAnnotateMode,
+  } = useReaderAnnotateMode({
+    hasSelection: Boolean(selection),
+    isCompact,
+    onSelectionShowChrome: () => setChromeVisible(true),
+  })
   const [canNavBack, setCanNavBack] = useState(false)
   const navStackRef = useRef<string[]>([])
   const turnPrevRef = useRef<() => void>(() => {})
@@ -260,23 +289,7 @@ function EpubReaderPage({ bookId }: { bookId: string }) {
     selectionRef.current = selection
   }, [selection])
 
-  useEffect(() => {
-    if (selection) setMidSelectMode(true)
-  }, [selection])
-
-  // 有选区时强制露出底栏，功能条嵌在进度/页码区域
-  useEffect(() => {
-    if (selection && isCompact) setChromeVisible(true)
-  }, [selection, isCompact])
-
   const [selectionChromeEl, setSelectionChromeEl] = useState<HTMLDivElement | null>(null)
-
-  // 无选区时超时退出划词；有选区则保持；顶栏开关钉住时不自动退出
-  useEffect(() => {
-    if (selection || !midSelectMode || midSelectPinnedRef.current) return
-    const t = window.setTimeout(() => setMidSelectMode(false), 8000)
-    return () => window.clearTimeout(t)
-  }, [selection, midSelectMode])
 
   /**
    * 兜底：iOS/Android 长按选词后常丢 pointerup。
@@ -299,35 +312,6 @@ function EpubReaderPage({ bookId }: { bookId: string }) {
     const id = window.setInterval(tick, 280)
     return () => window.clearInterval(id)
   }, [isCompact, midSelectMode, selection])
-
-  function enterAnnotateMode(opts?: { pinned?: boolean; toast?: boolean }) {
-    setMidSelectMode(true)
-    if (opts?.pinned) midSelectPinnedRef.current = true
-    if (opts?.toast !== false) {
-      toast.message('划词已开启：请再长按文字拖选', {
-        id: 'moyin-annotate-mode',
-        duration: 2200,
-        icon: null,
-      })
-    }
-  }
-
-  function exitAnnotateMode() {
-    midSelectPinnedRef.current = false
-    setMidSelectMode(false)
-  }
-
-  function toggleAnnotateMode() {
-    if (midSelectMode && midSelectPinnedRef.current) {
-      exitAnnotateMode()
-      return
-    }
-    if (midSelectMode && !selection) {
-      exitAnnotateMode()
-      return
-    }
-    enterAnnotateMode({ pinned: true })
-  }
 
   useEffect(() => {
     chromeVisibleRef.current = chromeVisible
@@ -551,13 +535,11 @@ function EpubReaderPage({ bookId }: { bookId: string }) {
 
         const sideLoad = Promise.all([
           api.get<Highlight[]>(`/api/highlights/book/${bookId}`).catch(() => [] as Highlight[]),
-          api.get<CitationProject[]>('/api/citation/projects').catch(() => [] as CitationProject[]),
+          loadProjects(),
           api.get<BookNote>(`/api/notes/${bookId}`).catch(() => ({ content: '' }) as BookNote),
-        ]).then(([hs, projs, note]) => {
+        ]).then(([hs, _projs, note]) => {
           if (cancelled) return [] as Highlight[]
           setHighlights(hs)
-          setProjects(projs)
-          setBasketProjectId(pickDefaultBasketProjectId(projs))
           setNoteContent(note.content || '')
           return hs
         })
@@ -2591,99 +2573,16 @@ function EpubReaderPage({ bookId }: { bookId: string }) {
 
   async function addToBasket(targetProjectId?: string) {
     if (!selection) return
-    let projectId = targetProjectId || basketProjectId || projects[0]?.id
-    if (!projectId) {
-      try {
-        const created = await api.post<{ id: string; name: string }>('/api/citation/projects', {
-          name: '默认引用篮',
-        })
-        projectId = created.id
-        setProjects((prev) => [{ id: created.id, name: created.name, script_variant: 'simplified', created_at: '' }, ...prev])
-        setBasketProjectId(created.id)
-      } catch (err) {
-        toast.error(err instanceof ApiError ? err.message : '无法创建引用篮项目')
-        return
-      }
-    }
-    try {
-      const pageNo = basketPage.trim()
-      const cfi =
-        selection.cfiRange && !selection.cfiRange.startsWith('mobile-') ? selection.cfiRange : ''
-      await api.post('/api/citation/items', {
-        project_id: projectId,
-        book_id: bookId,
-        quoted_text: selection.text,
-        page_no: pageNo,
-        cfi_range: cfi,
-      })
-      if (!pageNo) {
-        toast.success('已加入引用篮', {
-          id: 'citation-added',
-          description: '未填页码，导出前请补纸书页',
-          duration: 3400,
-        })
-      } else if (pageSourceRef.current === 'estimate') {
-        toast.success('已加入引用篮', {
-          id: 'citation-added',
-          description: '页码为估算，请按纸书核对',
-          duration: 3400,
-        })
-      } else if (pageSourceRef.current === 'virtual') {
-        toast.success('已加入引用篮', {
-          id: 'citation-added',
-          description: '当前为虚拟页，请改成纸书页码',
-          duration: 3400,
-        })
-      } else {
-        toast.success('已加入引用篮', { id: 'citation-added' })
-      }
-      dismissSelection()
-    } catch (err) {
-      toast.error(err instanceof ApiError ? err.message : '存入失败')
-    }
+    const locator = epubPersistableLocator(selection.cfiRange)
+    const ok = await addToBasketCore({ text: selection.text, locator }, targetProjectId)
+    if (ok) dismissSelection()
   }
 
   async function addToNewBasket(name: string) {
     if (!selection) return
-    const trimmed = name.trim()
-    if (!trimmed) {
-      toast.error('请输入引用篮名称')
-      return
-    }
-    try {
-      const created = await api.post<{ id: string; name: string }>('/api/citation/projects', {
-        name: trimmed,
-      })
-      setProjects((prev) => [
-        { id: created.id, name: created.name, script_variant: 'simplified', created_at: '' },
-        ...prev,
-      ])
-      setBasketProjectId(created.id)
-      await addToBasket(created.id)
-    } catch (err) {
-      toast.error(err instanceof ApiError ? err.message : '无法创建引用篮')
-    }
-  }
-
-  async function copyQuickFootnote() {
-    try {
-      const pageNo = basketPage.trim()
-      const params = new URLSearchParams({ book_id: bookId })
-      if (pageNo) params.set('page_no', pageNo)
-      const { text } = await api.get<{ text: string }>(`/api/citation/quick-footnote?${params}`)
-      if (!text) {
-        toast.error('无法生成脚注，请先完善书籍信息')
-        return
-      }
-      const ok = await copyTextToClipboard(text)
-      if (!ok) {
-        toast.error('复制失败，请长按选区使用系统复制')
-        return
-      }
-      toast.success(pageNo ? '脚注已复制' : '脚注已复制（未填页码）')
-    } catch (err) {
-      toast.error(err instanceof ApiError ? err.message : '复制脚注失败')
-    }
+    const locator = epubPersistableLocator(selection.cfiRange)
+    const ok = await addToNewBasketCore({ text: selection.text, locator }, name)
+    if (ok) dismissSelection()
   }
 
   function dismissSelection(opts?: { keepAnnotate?: boolean }) {
@@ -2774,22 +2673,6 @@ function EpubReaderPage({ bookId }: { bookId: string }) {
       toast.error(err instanceof ApiError ? err.message : '删除失败')
     }
   }
-
-  useEffect(() => {
-    if (!projects.length) return
-    if (!basketProjectId || !projects.some((p) => p.id === basketProjectId)) {
-      setBasketProjectId(pickDefaultBasketProjectId(projects))
-    }
-  }, [projects, basketProjectId])
-
-  useEffect(() => {
-    if (!basketProjectId) return
-    try {
-      localStorage.setItem(BASKET_PROJECT_KEY, basketProjectId)
-    } catch {
-      /* private mode */
-    }
-  }, [basketProjectId])
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {

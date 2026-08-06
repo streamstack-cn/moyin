@@ -157,6 +157,7 @@ export default function LibraryPage() {
   )
   const [showBatchDelete, setShowBatchDelete] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
+  const librarySearchRef = useRef<HTMLInputElement>(null)
   const softWatchTimerRef = useRef<number | null>(null)
   const batchStopRef = useRef(false)
   const [batchJob, setBatchJob] = useState<BatchProgressJob | null>(null)
@@ -946,7 +947,14 @@ export default function LibraryPage() {
         <div className="toolbar library-toolbar">
           <div className="search-box" onMouseMove={trackGlow}>
             <Search size={16} className="search-box-icon" aria-hidden />
-            <input className="input" placeholder="按书名 / 作者 / ISBN 搜索…" value={q} onChange={(e) => setQ(e.target.value)} />
+            <input
+              ref={librarySearchRef}
+              className="input"
+              placeholder="按书名 / 作者 / ISBN 搜索…"
+              value={q}
+              onChange={(e) => setQ(e.target.value)}
+              aria-label="搜索书库"
+            />
           </div>
           <select className="input" style={{ width: 140 }} value={status} onChange={(e) => setStatus(e.target.value)}>
             <option value="">全部状态</option>
@@ -990,6 +998,39 @@ export default function LibraryPage() {
               title="平铺全部"
             />
           </PageSeg>
+        </div>
+
+        <div className="library-filter-row library-find-shortcuts" aria-label="快捷找书">
+          <span
+            className={`tag-pill ${status === 'reading' ? 'active' : ''}`}
+            onClick={() => setStatus(status === 'reading' ? '' : 'reading')}
+            title="只看正在读的书"
+          >
+            <BookOpen size={12} style={{ marginRight: 4, verticalAlign: '-1px' }} />
+            继续阅读
+          </span>
+          <span
+            className={`tag-pill ${groupMode === 'tag' && !activeTag ? 'active' : ''}`}
+            onClick={() => {
+              setGroupMode('tag')
+              setActiveTag(null)
+            }}
+            title="按标签浏览"
+          >
+            <Tags size={12} style={{ marginRight: 4, verticalAlign: '-1px' }} />
+            按标签找
+          </span>
+          <span
+            className="tag-pill"
+            onClick={() => {
+              librarySearchRef.current?.focus()
+              librarySearchRef.current?.select()
+            }}
+            title="聚焦搜索框"
+          >
+            <Search size={12} style={{ marginRight: 4, verticalAlign: '-1px' }} />
+            搜索书名
+          </span>
         </div>
 
         {libraries.length > 0 && (

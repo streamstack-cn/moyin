@@ -11,8 +11,10 @@ try:
 except ImportError:
     pass
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from starlette.middleware.base import BaseHTTPMiddleware
+import uuid
 
 import api_admin
 import api_ai_reader
@@ -36,6 +38,20 @@ logger = logging.getLogger("moyin")
 # 避免 httpx 把带 API Key 的完整 URL 打进日志
 logging.getLogger("httpx").setLevel(logging.WARNING)
 
+REQUEST_ID_HEADER = "X-Request-Id"
+
+
+class RequestIdMiddleware(BaseHTTPMiddleware):
+    """透传/生成 X-Request-Id，写入响应头并挂到 request.state，便于与前端错误对齐。"""
+
+    async def dispatch(self, request: Request, call_next):
+        rid = (request.headers.get(REQUEST_ID_HEADER) or "").strip() or str(uuid.uuid4())
+        request.state.request_id = rid
+        response = await call_next(request)
+        response.headers[REQUEST_ID_HEADER] = rid
+        return response
+
+
 app = FastAPI(title="墨引 MoYin", description="电子书阅读 / 标注 / 引用管理系统", version=__version__)
 
 # 局域网 / 反向代理场景下全面放开 CORS，鉴权仍由 Bearer Token 保证
@@ -45,7 +61,9 @@ app.add_middleware(
     allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
+    expose_headers=[REQUEST_ID_HEADER],
 )
+app.add_middleware(RequestIdMiddleware)
 
 
 @app.on_event("startup")

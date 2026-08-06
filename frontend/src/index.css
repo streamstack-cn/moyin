@@ -273,10 +273,14 @@ button {
   position: relative;
   flex: 1;
   min-width: 0;
+  max-width: 100%;
   min-height: 100vh;
   min-height: 100dvh;
   display: flex;
   flex-direction: column;
+  /* 供子页用容器查询：主栏被侧栏挤窄时也能切换布局，不依赖视口宽度 */
+  container-type: inline-size;
+  container-name: main-area;
   /* 透明：这里之前是不透明的 --bg-0，把 body 的环境光壁纸整片盖死，
      导致主内容区（页面绝大部分可视范围）完全看不出毛玻璃感 */
   background-color: transparent;
@@ -293,6 +297,8 @@ button {
   z-index: 1;
   display: flex;
   flex-direction: column;
+  min-width: 0;
+  max-width: 100%;
   /* 默认随内容增高，让 .main-area 出现纵向滚动。
      若写成 flex:1 + min-height:0，包裹层会被锁在视口高度内，书库平铺等长列表
      的后半段既滚不到也看不见——移动端「平铺只剩高分推荐」正是这个原因。 */
@@ -323,6 +329,10 @@ button {
   border-bottom: 1px solid var(--border);
   gap: 20px;
   flex-wrap: wrap;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
 }
 
 /* 全站页眉左侧：标题 + 副标题（首页 / 书库 / 引用篮 / AI / 管理 / 设置） */
@@ -628,6 +638,7 @@ button.page-subtitle.home-daily-quote:focus-visible {
   text-overflow: ellipsis;
   white-space: nowrap;
   min-width: 0;
+  flex: 1 1 auto;
 }
 
 .home-daily-quote-book {
@@ -638,6 +649,19 @@ button.page-subtitle.home-daily-quote:focus-visible {
 }
 
 @media (max-width: 640px) {
+  button.page-subtitle.home-daily-quote {
+    flex-wrap: wrap;
+    row-gap: 2px;
+  }
+
+  .home-daily-quote-text {
+    white-space: normal;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    text-overflow: ellipsis;
+  }
+
   .home-daily-quote-book {
     display: none;
   }
@@ -5820,35 +5844,43 @@ mark.search-hit-mark,
 /* ── 首页顶栏：问候 | 居中搜索 | 书库 ─────────────────────────── */
 .home-topbar {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(280px, 640px) minmax(0, 1fr);
+  /* 禁止用 280px 硬下限：侧栏占用后主栏变窄时会把问候挤成「竖排字」并横向溢出 */
+  grid-template-columns: minmax(0, 1fr) minmax(0, 640px) minmax(0, 1fr);
   align-items: center;
   gap: 16px 20px;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
 }
 
 @media (min-width: 1280px) {
   .home-topbar {
-    grid-template-columns: minmax(0, 1fr) minmax(360px, 720px) minmax(0, 1fr);
+    grid-template-columns: minmax(0, 1fr) minmax(0, 720px) minmax(0, 1fr);
   }
 }
 
 @media (min-width: 1600px) {
   .home-topbar {
-    grid-template-columns: minmax(0, 1fr) minmax(420px, 820px) minmax(0, 1fr);
+    grid-template-columns: minmax(0, 1fr) minmax(0, 820px) minmax(0, 1fr);
   }
 }
 
 .home-topbar-greeting {
-  /* 关键修复：flex-direction:column 的容器作为 grid item 时，若子项含
-     white-space:nowrap 的长文本，容器会按子项 max-content 撑开而不是拉伸
-     到轨道宽度，导致「每日一句」把搜索框顶飞/压住。显式 stretch 强制它
-     贴合 grid 分配的那一列宽度。 */
   justify-self: stretch;
-  /* 标题/间距继承 .page-heading 统一规范 */
+  min-width: 0;
+  max-width: 100%;
+}
+
+.home-topbar-greeting .page-title {
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .home-topbar-search {
   width: 100%;
   min-width: 0;
+  max-width: 100%;
   display: flex;
   align-items: center;
   gap: 8px;
@@ -5939,6 +5971,18 @@ mark.search-hit-mark,
   min-height: 40px;
   height: 40px;
   font-size: 13px;
+}
+
+@media (max-width: 420px) {
+  .home-search-submit {
+    padding-inline: 12px;
+    font-size: 12.5px;
+  }
+
+  .home-search-field {
+    padding: 0 10px;
+    gap: 6px;
+  }
 }
 
 .home-topbar-trailing {
@@ -6296,12 +6340,15 @@ button.home-snippet-badge-basket:hover {
   }
 }
 
-@media (max-width: 900px) {
+@media (max-width: 1100px) {
+  /* 平板 / 侧栏占用后的窄主栏：整列堆叠，避免问候与快捷入口抢同一行 */
   .home-topbar {
-    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-columns: minmax(0, 1fr);
     grid-template-areas:
-      'greeting trailing'
-      'search search';
+      'greeting'
+      'search'
+      'trailing';
+    gap: 12px;
   }
 
   .home-topbar-greeting {
@@ -6315,6 +6362,73 @@ button.home-snippet-badge-basket:hover {
 
   .home-topbar-trailing {
     grid-area: trailing;
+    justify-content: stretch;
+    width: 100%;
+  }
+
+  .home-topbar-trailing .page-seg {
+    width: 100%;
+    flex-shrink: 1;
+    flex-wrap: wrap;
+  }
+
+  .home-topbar-trailing .page-seg-item {
+    flex: 1 1 auto;
+    min-width: 0;
+    justify-content: center;
+  }
+}
+
+@media (max-width: 900px) {
+  /* 保留旧断点兼容；与 1100px 规则一致，防止中间态回退到并排 */
+  .home-topbar {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-areas:
+      'greeting'
+      'search'
+      'trailing';
+  }
+
+  .home-topbar-greeting {
+    grid-area: greeting;
+  }
+
+  .home-topbar-search {
+    grid-area: search;
+    max-width: none;
+  }
+
+  .home-topbar-trailing {
+    grid-area: trailing;
+  }
+}
+
+/* 视口仍宽、但主内容区被侧栏挤窄：同样强制堆叠 */
+@container main-area (max-width: 920px) {
+  .home-topbar {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-areas:
+      'greeting'
+      'search'
+      'trailing';
+    gap: 12px;
+  }
+
+  .home-topbar-greeting { grid-area: greeting; }
+  .home-topbar-search { grid-area: search; max-width: none; }
+  .home-topbar-trailing {
+    grid-area: trailing;
+    justify-content: stretch;
+    width: 100%;
+  }
+  .home-topbar-trailing .page-seg {
+    width: 100%;
+    flex-wrap: wrap;
+  }
+  .home-topbar-trailing .page-seg-item {
+    flex: 1 1 auto;
+    min-width: 0;
+    justify-content: center;
   }
 }
 
@@ -7402,7 +7516,8 @@ button.stat-strip-item.clickable.active .stat-strip-value {
   }
 
   .library-topbar .page-title {
-    white-space: nowrap;
+    white-space: normal;
+    overflow-wrap: anywhere;
   }
 
   .library-topbar-actions,
@@ -7457,11 +7572,37 @@ button.stat-strip-item.clickable.active .stat-strip-value {
   }
 
   .citation-topbar .page-title {
-    white-space: nowrap;
+    white-space: normal;
+    overflow-wrap: anywhere;
   }
 
   .citation-topbar-actions {
     width: 100%;
+  }
+
+  .ai-reader-topbar,
+  .ui-settings-topbar,
+  .topbar:not(.home-topbar) {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .ai-reader-topbar .page-heading,
+  .ui-settings-topbar .page-heading {
+    width: 100%;
+  }
+
+  .ai-reader-topbar .page-seg,
+  .ui-settings-topbar .page-seg,
+  .topbar:not(.home-topbar) > .page-seg {
+    width: 100%;
+    flex-wrap: wrap;
+  }
+
+  .ai-reader-topbar .page-seg-item,
+  .ui-settings-topbar .page-seg-item {
+    flex: 1 1 auto;
+    min-width: 0;
   }
 
   .mobile-topbar {
@@ -7606,11 +7747,33 @@ button.stat-strip-item.clickable.active .stat-strip-value {
     gap: 14px;
   }
 
+  .home-topbar {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-areas:
+      'greeting'
+      'search'
+      'trailing';
+  }
+
+  .home-topbar-greeting { grid-area: greeting; }
+  .home-topbar-search { grid-area: search; }
+  .home-topbar-trailing {
+    grid-area: trailing;
+    width: 100%;
+    justify-content: stretch;
+  }
+
+  .home-topbar-trailing .page-seg {
+    width: 100%;
+  }
+
   .page-heading,
   .library-topbar-heading,
   .citation-topbar-heading,
   .home-topbar-greeting {
     gap: 8px;
+    width: 100%;
+    max-width: 100%;
   }
 
   .topbar .page-title,
@@ -7621,6 +7784,24 @@ button.stat-strip-item.clickable.active .stat-strip-value {
     letter-spacing: -0.02em;
     line-height: 1.2;
     color: var(--ink);
+    white-space: normal;
+    overflow-wrap: anywhere;
+    word-break: break-word;
+  }
+
+  /* 书库快捷找书：小屏允许换行，避免横向撑破 */
+  .library-find-shortcuts {
+    flex-wrap: wrap;
+  }
+
+  .library-toolbar {
+    width: 100%;
+    max-width: 100%;
+  }
+
+  .library-toolbar .page-seg {
+    flex-wrap: wrap;
+    max-width: 100%;
   }
 
   .topbar .page-subtitle,

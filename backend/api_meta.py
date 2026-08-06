@@ -149,6 +149,6 @@ async def proxy_cover(url: str = Query(..., min_length=8, max_length=1024)):
     return Response(
         content=content,
         media_type=content_type or "image/jpeg",
-        # 真实图片可短缓存；错误响应不再进入此分支
-        headers={"Cache-Control": "public, max-age=3600"},
+        # 代理封面带 ?v= 版本；可较长缓存，版本变更即换 URL
+        headers={"Cache-Control": "public, max-age=86400"},
     )

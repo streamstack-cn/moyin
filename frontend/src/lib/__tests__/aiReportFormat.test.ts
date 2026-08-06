@@ -1,8 +1,11 @@
 import { describe, expect, it } from 'vitest'
 import {
   labelReportField,
+  parseLabeledInsightText,
+  parseReportDisplayBlocks,
   renderReportValue,
   sanitizeReportText,
+  sectionKindForKey,
 } from '../aiReportFormat'
 
 describe('aiReportFormat', () => {
@@ -44,5 +47,32 @@ describe('aiReportFormat', () => {
     expect(out).toContain('论证：B')
     expect(out).toContain('我的思考：C')
     expect(out).not.toMatch(/\binsight\b/i)
+  })
+
+  it('parses insight objects into display blocks', () => {
+    const blocks = parseReportDisplayBlocks(
+      [
+        { insight: '要', argumentation: '论', reflection: '思' },
+        { 要点: '二', 论证: '证' },
+      ],
+      'insights',
+    )
+    expect(blocks).toHaveLength(2)
+    expect(blocks[0]).toMatchObject({ type: 'insight', index: 1 })
+    if (blocks[0].type === 'insight') {
+      expect(blocks[0].fields.map((f) => f.label)).toEqual(['要点', '论证', '我的思考'])
+    }
+  })
+
+  it('parses flattened insight text', () => {
+    const blocks = parseLabeledInsightText('（1）\n要点：甲\n论证：乙\n\n（2）\n要点：丙')
+    expect(blocks).toHaveLength(2)
+    expect(blocks[0].type).toBe('insight')
+  })
+
+  it('maps section keys to layout kinds', () => {
+    expect(sectionKindForKey('content_summary')).toBe('lede')
+    expect(sectionKindForKey('core_insights')).toBe('insights')
+    expect(sectionKindForKey('personal_reflections')).toBe('quote')
   })
 })

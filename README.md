@@ -22,7 +22,7 @@
 | 多格式书库 | EPUB / PDF / TXT 在线读；MOBI / AZW3 / FB2 等自动转 EPUB |
 | 沉浸阅读 | 进度保存、继续阅读、返回原处、书内搜索；选区气泡 / 主题弹层毛玻璃质感，移动端友好 |
 | 划词工具栏 | 高亮、批注、加入引用篮 / 当场新建引用篮、脚注 |
-| 引用篮 | 多项目整理、简繁处理、Word 真脚注与去重书目导出 |
+| 引用篮 | 多项目整理、简繁处理、预览复制脚注与参考书目（可选 Word 导出） |
 | AI 伴读 | 按高亮 / 笔记 / 引用生成阅读报告与追问；多服务商 API、画像可配、历史报告带封面 |
 | 首页与书库 | 每日一句悬浮预览、全库搜索；高分推荐（豆瓣分排序）、书架拖拽排序 |
 | 元数据 | 豆瓣（扫码登录）与 Google Books 并行匹配封面与书目 |
@@ -231,8 +231,22 @@ cd backend && python3 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 MOYIN_DATA_DIR=./data uvicorn main:app --host 127.0.0.1 --port 8420
 
-# 前端
-cd frontend && npm ci && npm run dev   # http://127.0.0.1:6173
+# 前端（默认也想占 6173；若 Docker 已占用则换端口）
+cd frontend && npm ci
+# 纯本地后端：
+npm run dev -- --port 5173 --strictPort
+# 前端连已在跑的 Docker（API 在 6173）：
+MOYIN_API_PROXY=http://127.0.0.1:6173 npm run dev -- --port 5173 --strictPort
+# 浏览器打开 http://127.0.0.1:5173
+```
+
+**约定：** 生产 / Docker 入口为 **6173**；本地 Vite 开发建议固定 **5173**，用 `MOYIN_API_PROXY` 指向后端，避免端口冲突。
+
+```bash
+# 自动化自检
+cd frontend && npm test && npm run build
+cd ../backend && .venv/bin/python -m unittest \
+  tests.test_citation_footnotes tests.test_citation_export_smoke tests.test_book_match -v
 ```
 
 ---

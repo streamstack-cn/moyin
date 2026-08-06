@@ -4,6 +4,7 @@ import { createPortal } from 'react-dom'
 import { BrowserRouter } from 'react-router-dom'
 import { Toaster } from 'sonner'
 import './index.css'
+import './styles/ai-reader.css'
 import App from './App.tsx'
 import {
   ToastCheckIcon,

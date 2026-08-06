@@ -1,18 +1,27 @@
-import { useEffect, useRef, type ReactNode } from 'react'
+import { lazy, Suspense, useEffect, useRef, type ReactNode } from 'react'
 import { Navigate, Route, Routes, useLocation, type Location } from 'react-router-dom'
 import { useAuth } from './contexts/AuthContext'
 import Layout from './components/Layout'
 import { emitMainResume } from './lib/mainResume'
 import LoginPage from './pages/LoginPage'
 import HomePage from './pages/HomePage'
-import LibraryPage from './pages/LibraryPage'
-import BookDetailPage from './pages/BookDetailPage'
-import ReaderPage from './pages/ReaderPage'
-import CitationBasketPage from './pages/CitationBasketPage'
-import AdminPage from './pages/AdminPage'
 import SearchPage from './pages/SearchPage'
-import AiReaderPage from './pages/AiReaderPage'
-import UISettingsPage from './pages/UISettingsPage'
+
+const LibraryPage = lazy(() => import('./pages/LibraryPage'))
+const BookDetailPage = lazy(() => import('./pages/BookDetailPage'))
+const ReaderPage = lazy(() => import('./pages/ReaderPage'))
+const CitationBasketPage = lazy(() => import('./pages/CitationBasketPage'))
+const AdminPage = lazy(() => import('./pages/AdminPage'))
+const AiReaderPage = lazy(() => import('./pages/AiReaderPage'))
+const UISettingsPage = lazy(() => import('./pages/UISettingsPage'))
+
+function PageFallback() {
+  return (
+    <div className="empty-state" style={{ minHeight: '40vh' }}>
+      <div className="spinner" />
+    </div>
+  )
+}
 
 function RequireAuth({ children }: { children: ReactNode }) {
   const { user, loading } = useAuth()
@@ -81,30 +90,34 @@ function AuthenticatedShell() {
     <>
       <div className="app-main-layer" hidden={isReader} aria-hidden={isReader}>
         <Layout displayLocation={mainLocation}>
-          <Routes location={mainLocation}>
-            <Route path="/" element={<HomePage />} />
-            <Route path="/library" element={<LibraryPage />} />
-            <Route path="/books/:bookId" element={<BookDetailPage />} />
-            <Route path="/citation" element={<CitationBasketPage />} />
-            <Route path="/search" element={<SearchPage />} />
-            <Route path="/ai-reader" element={<AiReaderPage />} />
-            <Route path="/ui-settings" element={<UISettingsPage />} />
-            <Route
-              path="/admin"
-              element={
-                <RequireAdmin>
-                  <AdminPage />
-                </RequireAdmin>
-              }
-            />
-            <Route path="*" element={<Navigate to="/" replace />} />
-          </Routes>
+          <Suspense fallback={<PageFallback />}>
+            <Routes location={mainLocation}>
+              <Route path="/" element={<HomePage />} />
+              <Route path="/library" element={<LibraryPage />} />
+              <Route path="/books/:bookId" element={<BookDetailPage />} />
+              <Route path="/citation" element={<CitationBasketPage />} />
+              <Route path="/search" element={<SearchPage />} />
+              <Route path="/ai-reader" element={<AiReaderPage />} />
+              <Route path="/ui-settings" element={<UISettingsPage />} />
+              <Route
+                path="/admin"
+                element={
+                  <RequireAdmin>
+                    <AdminPage />
+                  </RequireAdmin>
+                }
+              />
+              <Route path="*" element={<Navigate to="/" replace />} />
+            </Routes>
+          </Suspense>
         </Layout>
       </div>
       {isReader ? (
-        <Routes>
-          <Route path="/read/:bookId" element={<ReaderPage />} />
-        </Routes>
+        <Suspense fallback={<PageFallback />}>
+          <Routes>
+            <Route path="/read/:bookId" element={<ReaderPage />} />
+          </Routes>
+        </Suspense>
       ) : null}
     </>
   )

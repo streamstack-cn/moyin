@@ -334,15 +334,24 @@ export interface AiMaterial {
   full_text_chapters: { index: number; title: string; text: string }[]
 }
 
+export type AiReportFieldValue =
+  | string
+  | number
+  | boolean
+  | null
+  | AiReportFieldValue[]
+  | { [key: string]: AiReportFieldValue }
+
 export interface AiReportContent {
   raw?: string
-  content_summary?: string
-  core_insights?: string
-  personal_reflections?: string
-  knowledge_map?: string
-  reading_advice?: string
-  similar_books?: Array<{ title: string, author?: string, reason: string }>
-  quotable_passages?: Array<{ text: string, context?: string }>
+  content_summary?: AiReportFieldValue
+  /** 常为「要点/论证/我的思考」对象数组；历史数据也可能是纯字符串 */
+  core_insights?: AiReportFieldValue
+  personal_reflections?: AiReportFieldValue
+  knowledge_map?: AiReportFieldValue
+  reading_advice?: AiReportFieldValue
+  similar_books?: Array<{ title: string; author?: string; reason: string }>
+  quotable_passages?: Array<{ text: string; context?: string }>
   book_summary_for_citation?: string
 }
 

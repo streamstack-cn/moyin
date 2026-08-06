@@ -33,6 +33,7 @@ import ReaderJournalPanel from '../components/ReaderJournalPanel'
 import ReaderReturnOriginBar from '../components/ReaderReturnOriginBar'
 import ReaderTranslatePanel from '../components/ReaderTranslatePanel'
 import ReaderMidSwipeLayer from '../components/ReaderMidSwipeLayer'
+import ReaderProgressJump from '../components/ReaderProgressJump'
 import SelectionBubble from '../components/SelectionBubble'
 import { useAuth } from '../contexts/AuthContext'
 import { usePinchZoom } from '../hooks/usePinchZoom'
@@ -2705,8 +2706,7 @@ function EpubReaderPage({ bookId }: { bookId: string }) {
 
   function renderProgressJump() {
     return (
-      <div
-        className="reader-progress-jump"
+      <ReaderProgressJump
         title={
           pageSource === 'print'
             ? '纸书页码（来自 EPUB 内嵌页码表），可直接用于脚注'
@@ -2716,28 +2716,14 @@ function EpubReaderPage({ bookId }: { bookId: string }) {
                 ? '正在扫描全书…'
                 : '虚拟页码，仅供导航；脚注请填写纸质书页码'
         }
-      >
-        <span className="reader-progress-label">
-          {pageSource === 'print' ? '纸书' : pageSource === 'estimate' ? '约' : '页'}
-        </span>
-        <input
-          className="reader-page-input"
-          value={pageInput}
-          onChange={(e) => setPageInput(e.target.value.replace(/[^\d]/g, ''))}
-          onBlur={() => jumpToPage()}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter') {
-              e.currentTarget.blur()
-              jumpToPage(e.currentTarget.value)
-            }
-          }}
-          aria-label="跳转到页码"
-          disabled={!pagesReady}
-        />
-        <span className="reader-progress-meta">
-          / {pagesReady ? totalPages : pagesBuilding ? '…' : '—'} · {percent}%
-        </span>
-      </div>
+        label={pageSource === 'print' ? '纸书' : pageSource === 'estimate' ? '约' : '页'}
+        pageInput={pageInput}
+        totalLabel={pagesReady ? String(totalPages) : pagesBuilding ? '…' : '—'}
+        percent={percent}
+        disabled={!pagesReady}
+        onPageInputChange={setPageInput}
+        onJump={(raw) => jumpToPage(raw)}
+      />
     )
   }
 

@@ -42,6 +42,16 @@ frontend/test-results/
 frontend/playwright-report/
 frontend/e2e/
 
+# 单测仅本地保留，不上库
+backend/tests/
+frontend/vitest.config.ts
+**/__tests__/
+**/*.test.ts
+**/*.test.tsx
+**/*.test.js
+**/*.spec.ts
+**/*.spec.tsx
+
 # 本地/代理工作笔记（不上传仓库）
 docs/superpowers/
 .cursor/

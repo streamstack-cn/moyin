@@ -21,7 +21,7 @@ import {
   X,
 } from 'lucide-react'
 import { api, ApiError, getToken } from '../api/client'
-import type { BookDetail, BookNote, CitationProject, Highlight } from '../api/types'
+import type { BookDetail, BookNote, Highlight } from '../api/types'
 import LabSwitch from '../components/LabSwitch'
 import ReaderBookIdentity from '../components/ReaderBookIdentity'
 import ReaderJournalPanel from '../components/ReaderJournalPanel'
@@ -42,8 +42,9 @@ import {
 import { isAppleTouchDevice } from '../lib/platform'
 import { isReaderPinchBlocking, markTouchGestureMulti } from '../lib/readerGestureGate'
 import { copyTextToClipboard } from '../lib/clipboard'
-import { pickDefaultBasketProjectId } from '../lib/citationBasket'
-import { BASKET_PROJECT_KEY, type SelectionAnchor } from '../lib/readerConstants'
+import { useReaderAnnotateMode } from '../hooks/useReaderAnnotateMode'
+import { useReaderCitationBasket } from '../hooks/useReaderCitationBasket'
+import { type SelectionAnchor } from '../lib/readerConstants'
 import { useJournalDrawerWidth } from '../lib/useJournalDrawerWidth'
 import {
   isPdfLocator,
@@ -59,6 +60,7 @@ import {
   noTextToastKey,
   pageHasSelectableText,
 } from '../lib/pdfTextLayer'
+import { pdfPersistableLocator } from '../lib/readerSelection'
 import { findKeywordRanges } from '../lib/findKeywordRanges'
 import { highlightTerms } from '../lib/highlightQuery'
 import {
@@ -214,9 +216,24 @@ export default function PdfReaderPage({ book }: Props) {
     openPanelFromBubble,
     askExplain,
   } = useReaderSelectionTranslate(selection?.text, autoTranslate)
-  const [basketPage, setBasketPage] = useState('')
-  const [projects, setProjects] = useState<CitationProject[]>([])
-  const [basketProjectId, setBasketProjectId] = useState('')
+  const basketPageRef = useRef('')
+  const {
+    projects,
+    basketProjectId,
+    setBasketProjectId,
+    basketPage,
+    setBasketPage,
+    loadProjects,
+    addToBasket: addToBasketCore,
+    addToNewBasket: addToNewBasketCore,
+    copyQuickFootnote,
+  } = useReaderCitationBasket({
+    bookId: book.id,
+    resolvePageNo: () => basketPageRef.current.trim() || String(currentPageRef.current),
+  })
+  useEffect(() => {
+    basketPageRef.current = basketPage
+  }, [basketPage])
   const [highlights, setHighlights] = useState<Highlight[]>([])
   const [hlPaints, setHlPaints] = useState<HlPaint[]>([])
   const [flashPaints, setFlashPaints] = useState<HlPaint[]>([])
@@ -301,34 +318,12 @@ export default function PdfReaderPage({ book }: Props) {
   }, [page])
 
   useEffect(() => {
-    api
-      .get<CitationProject[]>('/api/citation/projects')
-      .then((list) => {
-        setProjects(list)
-        setBasketProjectId(pickDefaultBasketProjectId(list))
-      })
-      .catch(() => {})
+    void loadProjects()
     api
       .get<Highlight[]>(`/api/highlights/book/${book.id}`)
       .then(setHighlights)
       .catch(() => {})
-  }, [book.id])
-
-  useEffect(() => {
-    if (!projects.length) return
-    if (!basketProjectId || !projects.some((p) => p.id === basketProjectId)) {
-      setBasketProjectId(pickDefaultBasketProjectId(projects))
-    }
-  }, [projects, basketProjectId])
-
-  useEffect(() => {
-    if (!basketProjectId) return
-    try {
-      localStorage.setItem(BASKET_PROJECT_KEY, basketProjectId)
-    } catch {
-      /* private mode */
-    }
-  }, [basketProjectId])
+  }, [book.id, loadProjects])
 
   function clearPinchPreview() {
     const el = pageRef.current
@@ -760,28 +755,21 @@ export default function PdfReaderPage({ book }: Props) {
   const goPrevRef = useRef<() => void>(() => {})
   const goNextRef = useRef<() => void>(() => {})
   const lastPageTurnAtRef = useRef(0)
-  /** 移动端划词模式：卸掉中部滑动层，便于选字 */
-  const [midSelectMode, setMidSelectMode] = useState(false)
-  const midSelectPinnedRef = useRef(false)
   const mobilePresentRef = useRef<() => boolean>(() => false)
   const lastSwipeAtRef = useRef(0)
-
-  useEffect(() => {
-    if (selection) setMidSelectMode(true)
-  }, [selection])
-
-  useEffect(() => {
-    if (selection && isCompact) setChromeVisible(true)
-  }, [selection, isCompact])
+  const {
+    midSelectMode,
+    setMidSelectMode,
+    midSelectPinnedRef,
+    enterAnnotateMode,
+    toggleAnnotateMode,
+  } = useReaderAnnotateMode({
+    hasSelection: Boolean(selection),
+    isCompact,
+    onSelectionShowChrome: () => setChromeVisible(true),
+  })
 
   const [selectionChromeEl, setSelectionChromeEl] = useState<HTMLDivElement | null>(null)
-
-  // 无选区时超时退出划词；有选区则保持；顶栏开关钉住时不自动退出
-  useEffect(() => {
-    if (selection || !midSelectMode || midSelectPinnedRef.current) return
-    const t = window.setTimeout(() => setMidSelectMode(false), 8000)
-    return () => window.clearTimeout(t)
-  }, [selection, midSelectMode])
 
   useEffect(() => {
     if (!isCompact) return
@@ -812,35 +800,6 @@ export default function PdfReaderPage({ book }: Props) {
     const id = window.setInterval(tick, 280)
     return () => window.clearInterval(id)
   }, [isCompact, midSelectMode, selection])
-
-  function enterAnnotateMode(opts?: { pinned?: boolean; toast?: boolean }) {
-    setMidSelectMode(true)
-    if (opts?.pinned) midSelectPinnedRef.current = true
-    if (opts?.toast !== false) {
-      toast.message('划词已开启：请再长按文字拖选', {
-        id: 'moyin-annotate-mode',
-        duration: 2200,
-        icon: null,
-      })
-    }
-  }
-
-  function exitAnnotateMode() {
-    midSelectPinnedRef.current = false
-    setMidSelectMode(false)
-  }
-
-  function toggleAnnotateMode() {
-    if (midSelectMode && midSelectPinnedRef.current) {
-      exitAnnotateMode()
-      return
-    }
-    if (midSelectMode && !selection) {
-      exitAnnotateMode()
-      return
-    }
-    enterAnnotateMode({ pinned: true })
-  }
 
   function applyPageTurn(nextPage: number) {
     dismissSelection()
@@ -1759,79 +1718,16 @@ export default function PdfReaderPage({ book }: Props) {
 
   async function addToBasket(targetProjectId?: string) {
     if (!selection) return
-    let projectId = targetProjectId || basketProjectId || projects[0]?.id
-    if (!projectId) {
-      try {
-        const created = await api.post<{ id: string; name: string }>('/api/citation/projects', {
-          name: '默认引用篮',
-        })
-        projectId = created.id
-        setProjects((prev) => [
-          { id: created.id, name: created.name, script_variant: 'simplified', created_at: '' },
-          ...prev,
-        ])
-        setBasketProjectId(created.id)
-      } catch (err) {
-        toast.error(err instanceof ApiError ? err.message : '无法创建引用篮项目')
-        return
-      }
-    }
-    try {
-      const pageNo = basketPage.trim() || String(page)
-      await api.post('/api/citation/items', {
-        project_id: projectId,
-        book_id: book.id,
-        quoted_text: selection.text,
-        page_no: pageNo,
-        cfi_range: selection.locator || `pdf:#page=${page}`,
-      })
-      toast.success('已加入引用篮')
-      dismissSelection()
-    } catch (err) {
-      toast.error(err instanceof ApiError ? err.message : '存入失败')
-    }
+    const locator = pdfPersistableLocator(selection.locator, page)
+    const ok = await addToBasketCore({ text: selection.text, locator }, targetProjectId)
+    if (ok) dismissSelection()
   }
 
   async function addToNewBasket(name: string) {
     if (!selection) return
-    const trimmed = name.trim()
-    if (!trimmed) {
-      toast.error('请输入引用篮名称')
-      return
-    }
-    try {
-      const created = await api.post<{ id: string; name: string }>('/api/citation/projects', {
-        name: trimmed,
-      })
-      setProjects((prev) => [
-        { id: created.id, name: created.name, script_variant: 'simplified', created_at: '' },
-        ...prev,
-      ])
-      setBasketProjectId(created.id)
-      await addToBasket(created.id)
-    } catch (err) {
-      toast.error(err instanceof ApiError ? err.message : '无法创建引用篮')
-    }
-  }
-
-  async function copyQuickFootnote() {
-    try {
-      const pageNo = basketPage.trim() || String(page)
-      const params = new URLSearchParams({ book_id: book.id, page_no: pageNo })
-      const { text } = await api.get<{ text: string }>(`/api/citation/quick-footnote?${params}`)
-      if (!text) {
-        toast.error('无法生成脚注，请先完善书籍信息')
-        return
-      }
-      const ok = await copyTextToClipboard(text)
-      if (!ok) {
-        toast.error('复制失败，请长按选区使用系统复制')
-        return
-      }
-      toast.success('脚注已复制')
-    } catch (err) {
-      toast.error(err instanceof ApiError ? err.message : '复制脚注失败')
-    }
+    const locator = pdfPersistableLocator(selection.locator, page)
+    const ok = await addToNewBasketCore({ text: selection.text, locator }, name)
+    if (ok) dismissSelection()
   }
 
   async function deleteHighlight(h: Highlight) {

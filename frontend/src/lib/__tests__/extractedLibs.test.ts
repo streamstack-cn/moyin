@@ -8,6 +8,7 @@ import {
 import { buildBookSections } from '../librarySections'
 import { pageHasSelectableText } from '../pdfTextLayer'
 import { resolveReaderTheme } from '../readerTheme'
+import { epubPersistableLocator, pdfPersistableLocator } from '../readerSelection'
 import type { BookSummary, CitationProject, Library, Tag } from '../../api/types'
 import type { NavItem } from 'epubjs/types/navigation'
 
@@ -49,6 +50,18 @@ describe('pdfTextLayer', () => {
     expect(pageHasSelectableText([{ str: ' ' }, { str: '1' }])).toBe(false)
     expect(pageHasSelectableText([{ str: 'ab' }])).toBe(true)
     expect(pageHasSelectableText([{ str: '\u200b' }, { str: '字' }, { str: '词' }])).toBe(true)
+  })
+})
+
+describe('readerSelection', () => {
+  it('drops mobile ephemeral epub locators', () => {
+    expect(epubPersistableLocator('mobile-abc')).toBe('')
+    expect(epubPersistableLocator('epubcfi(/6/4)')).toBe('epubcfi(/6/4)')
+  })
+
+  it('falls back pdf locator to page', () => {
+    expect(pdfPersistableLocator('', 3)).toBe('pdf:#page=3')
+    expect(pdfPersistableLocator('pdf:#page=9&x=1', 3)).toBe('pdf:#page=9&x=1')
   })
 })
 

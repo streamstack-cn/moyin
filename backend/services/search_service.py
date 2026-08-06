@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 
 from models import Book, BookContentChunk, CitationBasketItem, CitationProject, Highlight, ReadingProgress
 from serializers import _authors_list, cover_url_for
+from services.progress_service import status_from_percent
 
 SNIPPET_RADIUS = 60
 
@@ -91,13 +92,17 @@ def search_global(db: Session, user_id: str, keyword: str, limit: int = 8) -> di
         .all()
     )
     book_ids = [b.id for b in book_rows]
-    status_map = {
-        p.book_id: p.status
-        for p in db.query(ReadingProgress).filter(
+    progress_rows = (
+        db.query(ReadingProgress).filter(
             ReadingProgress.user_id == user_id,
             ReadingProgress.book_id.in_(book_ids),
-        )
-    } if book_ids else {}
+        ).all()
+        if book_ids
+        else []
+    )
+    status_map = {
+        p.book_id: status_from_percent(p.percent, stored_status=p.status) for p in progress_rows
+    }
     books = [
         {
             "id": b.id,

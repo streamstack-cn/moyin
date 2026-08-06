@@ -1,4 +1,4 @@
-import { useRef, type MouseEvent, type TouchEvent, type ReactNode } from 'react'
+import { useEffect, useRef, useState, type MouseEvent, type ReactNode } from 'react'
 import { motion, useMotionValue, useSpring, useTransform } from 'framer-motion'
 
 /**
@@ -40,6 +40,18 @@ export default function CoverTilt({
   maxTilt?: number
 }) {
   const ref = useRef<HTMLDivElement>(null)
+  /** 触控端关闭跟手倾斜：与页面滚动抢手势，安卓尤甚 */
+  const [finePointer, setFinePointer] = useState(() =>
+    typeof window !== 'undefined' ? window.matchMedia('(hover: hover) and (pointer: fine)').matches : true,
+  )
+
+  useEffect(() => {
+    const mq = window.matchMedia('(hover: hover) and (pointer: fine)')
+    const sync = () => setFinePointer(mq.matches)
+    sync()
+    mq.addEventListener?.('change', sync)
+    return () => mq.removeEventListener?.('change', sync)
+  }, [])
 
   // Normalized pointer coordinates [-0.5, 0.5]
   const px = useMotionValue(0)
@@ -51,17 +63,15 @@ export default function CoverTilt({
   const rotateX = useTransform(sy, [-0.5, 0.5], [maxTilt, -maxTilt])
   const rotateY = useTransform(sx, [-0.5, 0.5], [-maxTilt * 1.15, maxTilt * 1.15])
 
-  function onMove(e: MouseEvent | TouchEvent) {
+  function onMove(e: MouseEvent) {
+    if (!finePointer) return
     const el = ref.current
     if (!el) return
     const rect = el.getBoundingClientRect()
     if (rect.width < 1 || rect.height < 1) return
 
-    const clientX = 'touches' in e ? e.touches[0].clientX : e.clientX
-    const clientY = 'touches' in e ? e.touches[0].clientY : e.clientY
-
-    const x = clientX - rect.left
-    const y = clientY - rect.top
+    const x = e.clientX - rect.left
+    const y = e.clientY - rect.top
 
     px.set(x / rect.width - 0.5)
     py.set(y / rect.height - 0.5)
@@ -84,25 +94,29 @@ export default function CoverTilt({
       ref={ref}
       className={className}
       initial={{ scale: 1, y: 0 }}
-      whileHover={{ scale: 1.045, y: -7, transition: hoverTransition }}
-      whileTap={{ scale: 0.975, y: -2, transition: tapTransition }}
+      whileHover={finePointer ? { scale: 1.045, y: -7, transition: hoverTransition } : undefined}
+      whileTap={{ scale: 0.97, transition: tapTransition }}
       transition={hoverTransition}
-      style={{
-        rotateX,
-        rotateY,
-        transformPerspective: 1000,
-        transformStyle: 'preserve-3d',
-      }}
-      onMouseMove={onMove}
-      onMouseLeave={onLeave}
-      onTouchStart={onMove}
-      onTouchMove={onMove}
-      onTouchEnd={onLeave}
-      onTouchCancel={onLeave}
+      style={
+        finePointer
+          ? {
+              rotateX,
+              rotateY,
+              transformPerspective: 1000,
+              transformStyle: 'preserve-3d',
+            }
+          : undefined
+      }
+      onMouseMove={finePointer ? onMove : undefined}
+      onMouseLeave={finePointer ? onLeave : undefined}
     >
       {children}
-      <div className="parallax-glare" aria-hidden />
-      <div className="parallax-sheen" aria-hidden />
+      {finePointer && (
+        <>
+          <div className="parallax-glare" aria-hidden />
+          <div className="parallax-sheen" aria-hidden />
+        </>
+      )}
     </motion.div>
   )
 }

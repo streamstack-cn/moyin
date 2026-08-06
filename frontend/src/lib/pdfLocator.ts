@@ -4,6 +4,7 @@
  * 索引对应 pdf.js TextLayer 的 textDivs / textContent items，缩放后可重算几何。
  */
 
+import type { SelectionAnchor } from './readerConstants'
 import { rangeToSelectionAnchor } from './selectionBubblePlacement'
 
 export interface PdfSelectionLocator {
@@ -222,10 +223,7 @@ export function locatorToRelativeRects(
   return out
 }
 
-export function rangeToAnchor(
-  range: Range,
-  viewportEl: HTMLElement,
-): { x: number; y: number; height: number; endX?: number; endY?: number } | null {
+export function rangeToAnchor(range: Range, viewportEl: HTMLElement): SelectionAnchor | null {
   const box = viewportEl.getBoundingClientRect()
   return rangeToSelectionAnchor(range, {
     left: -box.left,

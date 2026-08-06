@@ -1,14 +1,32 @@
-import { useEffect, useLayoutEffect, useRef, useState, type RefObject } from 'react'
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type CSSProperties,
+  type RefObject,
+} from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { toast } from 'sonner'
-import { ArrowRight, BookOpen, Layers, Quote, Search, Trash2, X } from 'lucide-react'
+import { ArrowRight, BookOpen, Layers, Quote, Search, X } from 'lucide-react'
 import { api, ApiError } from '../api/client'
 import type { BookSummary, DailyQuote, GlobalSearchResult, HomeFeed, HomeSnippet } from '../api/types'
 import BookCard from '../components/BookCard'
+import ConfirmDialog from '../components/ConfirmDialog'
 import GlobalSearchResults from '../components/GlobalSearchResults'
-import Modal from '../components/Modal'
+import HorizontalShelf from '../components/HorizontalShelf'
+import { PageSeg, PageSegItem } from '../components/PageSeg'
 import { useAuth } from '../contexts/AuthContext'
+import { useUISettings } from '../contexts/UISettingsContext'
+import { useTapGuard } from '../hooks/useTapGuard'
 import { formatChipClass, formatLabel } from '../lib/bookFormat'
+import { onMainResume } from '../lib/mainResume'
+import {
+  finishNudgeIntensity,
+  idleDaysSinceLastRead,
+  shouldNudgeFinishReading,
+} from '../lib/readingNudge'
 import { readerDeepLink } from '../lib/readerDeepLink'
 import { trackGlow } from '../lib/glowTrack'
 
@@ -78,10 +96,14 @@ function useQuoteCapacity(containerRef: RefObject<HTMLDivElement | null>) {
 
     const update = () => {
       const w = el.clientWidth || 320
-      const colMin = w < 480 ? 240 : 280
+      // 移动端只留 2 条，避免「摘录与引用」顶掉继续阅读 / 最新入库
+      if (w < 640) {
+        setCount(2)
+        return
+      }
+      const colMin = 280
       const cols = Math.max(1, Math.floor((w + 16) / (colMin + 16)))
-      const rows = w < 640 ? 2 : w < 1100 ? 2 : 2
-      setCount(Math.max(2, Math.min(12, cols * rows)))
+      setCount(Math.max(2, Math.min(12, cols * 2)))
     }
 
     update()
@@ -110,16 +132,30 @@ export default function HomePage() {
   const quotesRef = useRef<HTMLDivElement>(null)
   const quoteCapacity = useQuoteCapacity(quotesRef)
 
-  useEffect(() => {
-    api
-      .get<HomeFeed>('/api/books/home')
-      .then(setFeed)
-      .finally(() => setLoading(false))
-    api
-      .get<DailyQuote | null>('/api/highlights/daily-quote')
-      .then(setDailyQuote)
-      .catch(() => setDailyQuote(null))
+  const refreshHome = useCallback(async (opts?: { silent?: boolean }) => {
+    if (!opts?.silent) setLoading(true)
+    try {
+      const [nextFeed, nextQuote] = await Promise.all([
+        api.get<HomeFeed>('/api/books/home'),
+        api.get<DailyQuote | null>('/api/highlights/daily-quote').catch(() => null),
+      ])
+      setFeed(nextFeed)
+      setDailyQuote(nextQuote)
+    } catch {
+      if (!opts?.silent) {
+        /* 首次加载失败仍结束 skeleton，页面空态即可 */
+      }
+    } finally {
+      if (!opts?.silent) setLoading(false)
+    }
   }, [])
+
+  useEffect(() => {
+    void refreshHome()
+    return onMainResume(() => {
+      void refreshHome({ silent: true })
+    })
+  }, [refreshHome])
 
   async function runSearch(keyword: string) {
     const value = keyword.trim()
@@ -217,10 +253,10 @@ export default function HomePage() {
     <>
       <div className="topbar home-topbar">
         <div className="home-topbar-greeting">
-          <div className="page-title text-gradient-accent">
+          <h1 className="page-title">
             {greeting()}
             {user?.display_name ? `，${user.display_name}` : ''}
-          </div>
+          </h1>
           {dailyQuote ? (
             <div className="home-daily-quote-wrap">
               <button
@@ -279,11 +315,15 @@ export default function HomePage() {
         </div>
 
         <div className="home-topbar-trailing">
-          <button type="button" className="btn home-library-btn" onClick={() => navigate('/library')}>
-            <Layers size={16} />
-            <span className="btn-label-full">进入书库</span>
-            <span className="btn-label-short">书库</span>
-          </button>
+          <PageSeg aria-label="快捷入口">
+            <PageSegItem
+              primary
+              icon={<Layers size={15} />}
+              label="进入书库"
+              shortLabel="书库"
+              onClick={() => navigate('/library')}
+            />
+          </PageSeg>
         </div>
       </div>
 
@@ -306,6 +346,37 @@ export default function HomePage() {
             ) : (
               searchResult && <GlobalSearchResults result={searchResult} activeQuery={activeQuery} />
             )}
+          </section>
+        )}
+
+        {showFeed && hasContinue && (
+          <section className="home-section home-continue-section">
+            <div className="home-section-header">
+              <div className="home-section-title">继续阅读</div>
+              <button className="home-section-link" onClick={() => navigate('/library?status=reading')}>
+                查看全部 <ArrowRight size={13} />
+              </button>
+            </div>
+            <HorizontalShelf className="continue-shelf" ariaLabel="继续阅读">
+              {feed!.continue_reading.map((b) => (
+                <ContinueCard
+                  key={b.id}
+                  book={b}
+                  onDismissed={(id) => {
+                    setFeed((prev) =>
+                      prev
+                        ? {
+                            ...prev,
+                            continue_reading: prev.continue_reading.filter((x) => x.id !== id),
+                          }
+                        : prev,
+                    )
+                  }}
+                />
+              ))}
+              {/* 末尾占位：保证最后一张封面旋转抖动不被 overflow 右缘啃掉 */}
+              <div className="h-shelf-end-space" aria-hidden="true" />
+            </HorizontalShelf>
           </section>
         )}
 
@@ -341,37 +412,8 @@ export default function HomePage() {
           </section>
         )}
 
-        {showFeed && hasContinue && (
-          <section className="home-section">
-            <div className="home-section-header">
-              <div className="home-section-title">继续阅读</div>
-              <button className="home-section-link" onClick={() => navigate('/library?status=reading')}>
-                查看全部 <ArrowRight size={13} />
-              </button>
-            </div>
-            <div className="continue-shelf">
-              {feed!.continue_reading.map((b) => (
-                <ContinueCard
-                  key={b.id}
-                  book={b}
-                  onDismissed={(id) => {
-                    setFeed((prev) =>
-                      prev
-                        ? {
-                            ...prev,
-                            continue_reading: prev.continue_reading.filter((x) => x.id !== id),
-                          }
-                        : prev,
-                    )
-                  }}
-                />
-              ))}
-            </div>
-          </section>
-        )}
-
         {showFeed && (
-          <section className="home-section">
+          <section className="home-section home-recent-section">
             <div className="home-section-header">
               <div className="home-section-title">最新入库</div>
               <button className="home-section-link" onClick={() => navigate('/library')}>
@@ -604,35 +646,21 @@ function SnippetCard({
     </div>
 
     {confirmOpen && (
-      <Modal
+      <ConfirmDialog
         title={isCitation ? '删除引用' : '删除高亮'}
-        onClose={() => !busy && setConfirmOpen(false)}
-        width={420}
-        closeOnBackdrop={!busy}
+        lead={isCitation ? '确认删除这条引用？' : '确认删除这条高亮？'}
+        description={
+          isCitation
+            ? '若该引用关联了书内高亮，将一并从书中移除。此操作不可撤销。'
+            : '若已加入引用篮，将一并移除对应引用。此操作不可撤销。'
+        }
+        busy={busy}
+        busyLabel="删除中…"
+        onClose={() => setConfirmOpen(false)}
+        onConfirm={confirmRemove}
       >
-        <div className="confirm-dialog">
-          <div className="confirm-dialog-lead">
-            {isCitation ? '确认删除这条引用？' : '确认删除这条高亮？'}
-          </div>
-          <p className="confirm-dialog-desc">
-            {isCitation
-              ? '若该引用关联了书内高亮，将一并从书中移除。此操作不可撤销。'
-              : '若已加入引用篮，将一并移除对应引用。此操作不可撤销。'}
-          </p>
-          {snippet.quoted_text ? (
-            <p className="confirm-dialog-quote">「{text}」</p>
-          ) : null}
-          <div className="confirm-dialog-actions">
-            <button className="btn" type="button" disabled={busy} onClick={() => setConfirmOpen(false)}>
-              取消
-            </button>
-            <button className="btn btn-danger" type="button" disabled={busy} onClick={() => void confirmRemove()}>
-              <Trash2 size={15} />
-              {busy ? '删除中…' : '确认删除'}
-            </button>
-          </div>
-        </div>
-      </Modal>
+        {snippet.quoted_text ? <p className="confirm-dialog-quote">「{text}」</p> : null}
+      </ConfirmDialog>
     )}
     </>
   )
@@ -646,7 +674,16 @@ function ContinueCard({
   onDismissed: (id: string) => void
 }) {
   const navigate = useNavigate()
+  const { finishNudge } = useUISettings()
   const [busy, setBusy] = useState(false)
+  const tap = useTapGuard(14)
+  const nudge = finishNudge && shouldNudgeFinishReading(book)
+  const idleDays = nudge ? idleDaysSinceLastRead(book.last_read_at) : 0
+  const intensity = nudge ? finishNudgeIntensity(book.last_read_at) : 'low'
+  // 各卡片错开抖动相位，避免齐刷刷晃（类似 iOS 主屏）
+  let jigglePhase = 0
+  for (let i = 0; i < book.id.length; i++) jigglePhase = (jigglePhase + book.id.charCodeAt(i) * 17) % 420
+  const jiggleDelay = `${-(jigglePhase / 1000)}s`
 
   async function dismiss(e: React.MouseEvent) {
     e.stopPropagation()
@@ -667,35 +704,78 @@ function ContinueCard({
     }
   }
 
+  const nudgeLetters = Array.from('请读完我')
+  const openBook = tap.guardClick(() => {
+    navigate(`/read/${book.id}`)
+  })
+
   return (
-    <div className="continue-card" onClick={() => navigate(`/read/${book.id}`)}>
-      <div className="continue-cover">
-        {book.cover_url ? (
-          <img src={book.cover_url} alt={book.title} loading="lazy" />
-        ) : (
-          <div className="book-cover-placeholder">{book.title}</div>
-        )}
-        <div className={formatChipClass(book.file_format)} title={`格式：${formatLabel(book.file_format)}`}>
-          {formatLabel(book.file_format)}
-        </div>
-        <button
-          type="button"
-          className="continue-dismiss"
-          title="取消继续阅读，设为未读"
-          aria-label="取消继续阅读"
-          disabled={busy}
-          onClick={dismiss}
-        >
-          <X size={14} />
-        </button>
-        <div className="continue-overlay">
-          <div className="continue-play">
-            <BookOpen size={16} />
-            继续阅读
+    <div
+      className={`continue-card${nudge ? ` continue-card-nudge continue-card-nudge--${intensity}` : ''}`}
+      onPointerDown={tap.onPointerDown}
+      onPointerMove={tap.onPointerMove}
+      onPointerUp={tap.onPointerUp}
+      onPointerCancel={tap.onPointerCancel}
+      onClick={openBook}
+    >
+      <div className={nudge ? 'continue-jiggle-lift' : undefined}>
+        <div className={nudge ? 'continue-cover-stage' : undefined}>
+          <div
+            className={nudge ? `continue-jiggle continue-jiggle--${intensity}` : undefined}
+            style={nudge ? ({ ['--nudge-delay']: jiggleDelay } as CSSProperties) : undefined}
+          >
+            <div className="continue-cover">
+              {book.cover_url ? (
+                <img src={book.cover_url} alt={book.title} loading="lazy" />
+              ) : (
+                <div className="book-cover-placeholder">{book.title}</div>
+              )}
+              <div className={formatChipClass(book.file_format)} title={`格式：${formatLabel(book.file_format)}`}>
+                {formatLabel(book.file_format)}
+              </div>
+              <button
+                type="button"
+                className="continue-dismiss"
+                title="取消继续阅读，设为未读"
+                aria-label="取消继续阅读"
+                disabled={busy}
+                onClick={dismiss}
+              >
+                <X size={14} />
+              </button>
+              <div className="continue-overlay">
+                <div className="continue-play">
+                  <BookOpen size={16} />
+                  {nudge ? '来读完我' : '继续阅读'}
+                </div>
+              </div>
+            </div>
           </div>
+          {nudge && (
+            <div
+              className={`continue-finish-nudge continue-finish-nudge--${intensity}`}
+              title={idleDays > 0 ? `已经 ${idleDays} 天没翻开了` : '好久没见面了'}
+            >
+              <span className="continue-finish-nudge-tail" aria-hidden="true" />
+              <span className="continue-finish-nudge-text" aria-label="请读完我">
+                {nudgeLetters.map((ch, i) => (
+                  <span
+                    key={`${ch}-${i}`}
+                    className="continue-nudge-letter"
+                    style={{ animationDelay: `${i * 0.12}s` }}
+                  >
+                    {ch}
+                  </span>
+                ))}
+              </span>
+              {idleDays >= 7 && (
+                <span className="continue-finish-nudge-days">等你 {idleDays} 天了</span>
+              )}
+            </div>
+          )}
         </div>
       </div>
-      <div className="continue-progress-track">
+      <div className={`continue-progress-track${nudge ? ' is-nudge' : ''}`}>
         <div className="continue-progress-fill" style={{ width: `${book.reading_percent}%` }} />
       </div>
       <div className="continue-meta">

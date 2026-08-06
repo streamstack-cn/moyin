@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 
 from models import Book, Tag
+from services.progress_service import status_from_percent
 
 
 def _authors_list(book: Book) -> list[str]:
@@ -59,7 +60,9 @@ def book_summary(
             book.file_format in ("epub", "txt", "pdf") or book.converted_path
         ),
         "added_at": book.added_at,
-        "reading_status": progress.status if progress else "unread",
+        "reading_status": (
+            status_from_percent(progress.percent, stored_status=progress.status) if progress else "unread"
+        ),
         "reading_percent": round(progress.percent * 100) if progress and progress.percent else 0,
         "last_read_at": progress.updated_at if progress else None,
         "library_id": book.library_id,

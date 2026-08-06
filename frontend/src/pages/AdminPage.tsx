@@ -1,10 +1,12 @@
 import { useEffect, useRef, useState } from 'react'
 import { toast } from 'sonner'
-import { ChevronDown, ChevronRight, Database, Download, Edit3, ExternalLink, History, LogOut, Plus, QrCode, RefreshCw, Save, Trash2, Users, Wand2 } from 'lucide-react'
+import { ChevronDown, ChevronRight, Database, Download, Edit3, ExternalLink, History, LogOut, Plus, QrCode, RefreshCw, Save, Trash2, Upload, Users, Wand2 } from 'lucide-react'
 import { api, ApiError, downloadUrl } from '../api/client'
 import type { AdminUser } from '../api/types'
 import ConfirmDialog from '../components/ConfirmDialog'
+import LabSwitch from '../components/LabSwitch'
 import Modal from '../components/Modal'
+import { PageSeg, PageSegItem } from '../components/PageSeg'
 import { useAuth } from '../contexts/AuthContext'
 import { APP_VERSION_LABEL } from '../version'
 
@@ -65,18 +67,46 @@ export default function AdminPage() {
   return (
     <>
       <div className="topbar">
-        <div>
-          <div className="page-title">管理后台</div>
-          <div className="page-subtitle">用户管理 · 元数据获取 · 系统状态 · 版本更新</div>
+        <div className="page-heading">
+          <h1 className="page-title">管理后台</h1>
+          <p className="page-subtitle">用户管理 · 元数据获取 · 系统状态 · 版本更新</p>
         </div>
       </div>
       <div className="page-content">
-        <div className="admin-tabs" role="tablist" aria-label="管理后台分区">
-          <TabBtn active={tab === 'users'} onClick={() => setTab('users')} icon={<Users size={15} />} label="用户管理" />
-          <TabBtn active={tab === 'douban'} onClick={() => setTab('douban')} icon={<Wand2 size={15} />} label="元数据获取" />
-          <TabBtn active={tab === 'system'} onClick={() => setTab('system')} icon={<Database size={15} />} label="系统状态" />
-          <TabBtn active={tab === 'changelog'} onClick={() => setTab('changelog')} icon={<History size={15} />} label="版本更新" />
-        </div>
+        <PageSeg className="admin-tabs" role="tablist" aria-label="管理后台分区">
+          <PageSegItem
+            role="tab"
+            aria-selected={tab === 'users'}
+            active={tab === 'users'}
+            onClick={() => setTab('users')}
+            icon={<Users size={15} />}
+            label="用户管理"
+          />
+          <PageSegItem
+            role="tab"
+            aria-selected={tab === 'douban'}
+            active={tab === 'douban'}
+            onClick={() => setTab('douban')}
+            icon={<Wand2 size={15} />}
+            label="元数据获取"
+          />
+          <PageSegItem
+            role="tab"
+            aria-selected={tab === 'system'}
+            active={tab === 'system'}
+            onClick={() => setTab('system')}
+            icon={<Database size={15} />}
+            label="系统状态"
+          />
+          <PageSegItem
+            role="tab"
+            aria-selected={tab === 'changelog'}
+            active={tab === 'changelog'}
+            onClick={() => setTab('changelog')}
+            icon={<History size={15} />}
+            label="版本更新"
+          />
+        </PageSeg>
 
         {tab === 'users' && <UsersPanel />}
         {tab === 'douban' && <DoubanPanel />}
@@ -87,15 +117,6 @@ export default function AdminPage() {
   )
 }
 
-
-function TabBtn({ active, onClick, icon, label }: { active: boolean; onClick: () => void; icon: React.ReactNode; label: string }) {
-  return (
-    <button type="button" role="tab" aria-selected={active} className={`admin-tab ${active ? 'active' : ''}`} onClick={onClick}>
-      {icon}
-      {label}
-    </button>
-  )
-}
 
 function UsersPanel() {
   const { user: me } = useAuth()
@@ -146,12 +167,11 @@ function UsersPanel() {
 
   return (
     <div className="card card-pad">
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16, gap: 12 }}>
         <div style={{ fontWeight: 700 }}>账号列表</div>
-        <button className="btn btn-primary btn-sm" onClick={() => setShowCreate(true)}>
-          <Plus size={14} />
-          新建用户
-        </button>
+        <PageSeg aria-label="用户操作">
+          <PageSegItem primary icon={<Plus size={14} />} label="新建用户" onClick={() => setShowCreate(true)} />
+        </PageSeg>
       </div>
 
       {loading ? (
@@ -237,6 +257,7 @@ function UsersPanel() {
           }
           description="该操作不可恢复。"
           busy={deletingUser}
+          busyLabel="删除中…"
           onClose={() => !deletingUser && setPendingDelete(null)}
           onConfirm={confirmRemoveUser}
         />
@@ -813,15 +834,21 @@ function DoubanPanel() {
 
       <div className="divider" />
 
-      <div className="field">
-        <label>
-          <input type="checkbox" checked={enabled} onChange={(e) => setEnabled(e.target.checked)} /> 启用豆瓣元数据抓取
-        </label>
-      </div>
-      <div className="field">
-        <label>
-          <input type="checkbox" checked={autoMatch} onChange={(e) => setAutoMatch(e.target.checked)} /> 导入新书时自动匹配元数据
-        </label>
+      <div className="settings-switch-group">
+        <div className="settings-switch-row">
+          <div className="settings-switch-text">
+            <div className="settings-switch-title">启用豆瓣元数据抓取</div>
+            <div className="settings-switch-desc">关闭后不再向豆瓣请求封面与书目信息</div>
+          </div>
+          <LabSwitch checked={enabled} onChange={setEnabled} />
+        </div>
+        <div className="settings-switch-row">
+          <div className="settings-switch-text">
+            <div className="settings-switch-title">导入新书时自动匹配元数据</div>
+            <div className="settings-switch-desc">入库后自动尝试匹配豆瓣 / Google 元数据</div>
+          </div>
+          <LabSwitch checked={autoMatch} onChange={setAutoMatch} />
+        </div>
       </div>
       <button className="btn" onClick={save} disabled={saving}>
         <Save size={15} />
@@ -954,13 +981,24 @@ function SystemPanel() {
   const [status, setStatus] = useState<SystemStatus | null>(null)
   const [repairing, setRepairing] = useState(false)
   const [wheelPageTurn, setWheelPageTurn] = useState(true)
+  const [loginCoverFlow, setLoginCoverFlow] = useState(true)
   const [savingReader, setSavingReader] = useState(false)
+  const [savingLogin, setSavingLogin] = useState(false)
   const [scanEnabled, setScanEnabled] = useState(false)
   const [scanInterval, setScanInterval] = useState(60)
   const [watchDebounce, setWatchDebounce] = useState(8)
   const [scanMeta, setScanMeta] = useState<LibraryScanSettings | null>(null)
   const [savingScan, setSavingScan] = useState(false)
   const [scanningAll, setScanningAll] = useState(false)
+  const restoreInputRef = useRef<HTMLInputElement>(null)
+  const [restoreBusy, setRestoreBusy] = useState(false)
+  const [restorePreview, setRestorePreview] = useState<{
+    file: File
+    type: string
+    type_label: string
+    app_version?: string
+    created_at?: string
+  } | null>(null)
 
   function loadStatus() {
     api.get<SystemStatus>('/api/admin/system').then(setStatus).catch(() => {})
@@ -971,6 +1009,13 @@ function SystemPanel() {
       .get<{ wheel_page_turn: boolean }>('/api/settings/reader')
       .then((r) => setWheelPageTurn(!!r.wheel_page_turn))
       .catch(() => {})
+  }
+
+  function loadLoginSettings() {
+    api
+      .get<{ login_cover_flow: boolean }>('/api/settings/login')
+      .then((r) => setLoginCoverFlow(r.login_cover_flow !== false))
+      .catch(() => setLoginCoverFlow(true))
   }
 
   function loadLibraryScanSettings() {
@@ -988,6 +1033,7 @@ function SystemPanel() {
   useEffect(() => {
     loadStatus()
     loadReaderSettings()
+    loadLoginSettings()
     loadLibraryScanSettings()
   }, [])
 
@@ -1015,6 +1061,20 @@ function SystemPanel() {
       toast.error(err instanceof ApiError ? err.message : '保存失败')
     } finally {
       setSavingReader(false)
+    }
+  }
+
+  async function saveLoginCoverFlow(next: boolean) {
+    setLoginCoverFlow(next)
+    setSavingLogin(true)
+    try {
+      await api.put('/api/settings/login', { login_cover_flow: next })
+      toast.success(next ? '已开启登录页封面动态' : '已关闭登录页封面动态')
+    } catch (err) {
+      setLoginCoverFlow(!next)
+      toast.error(err instanceof ApiError ? err.message : '保存失败')
+    } finally {
+      setSavingLogin(false)
     }
   }
 
@@ -1107,28 +1167,54 @@ function SystemPanel() {
 
       <div className="divider" />
       <div style={{ fontWeight: 700, marginBottom: 10 }}>阅读器设置</div>
-      <label style={{ display: 'flex', alignItems: 'center', gap: 10, fontSize: 13.5, marginBottom: 8 }}>
-        <input
-          type="checkbox"
-          checked={wheelPageTurn}
-          disabled={savingReader}
-          onChange={(e) => saveReaderSettings(e.target.checked)}
-        />
-        启用鼠标滚轮上下翻页（EPUB / PDF）
-      </label>
-      <p style={{ fontSize: 12.5, color: 'var(--ink-faint)', lineHeight: 1.6, margin: 0 }}>
-        关闭后阅读页滚轮不再翻页，避免与页面滚动/触控板手势冲突。修改后对新打开的阅读页立即生效。
-      </p>
+      <div className="settings-switch-group">
+        <div className="settings-switch-row">
+          <div className="settings-switch-text">
+            <div className="settings-switch-title">启用鼠标滚轮上下翻页</div>
+            <div className="settings-switch-desc">
+              适用于 EPUB / PDF；关闭后避免与页面滚动、触控板手势冲突，对新打开的阅读页立即生效
+            </div>
+          </div>
+          <LabSwitch
+            checked={wheelPageTurn}
+            disabled={savingReader}
+            onChange={(on) => saveReaderSettings(on)}
+          />
+        </div>
+      </div>
+
+      <div className="divider" />
+      <div style={{ fontWeight: 700, marginBottom: 10 }}>登录页设置</div>
+      <div className="settings-switch-group">
+        <div className="settings-switch-row">
+          <div className="settings-switch-text">
+            <div className="settings-switch-title">登录页封面动态背景</div>
+            <div className="settings-switch-desc">
+              默认开启；以书库封面横向缓动为登录背景。关闭后显示简洁静态背景（全站生效）
+            </div>
+          </div>
+          <LabSwitch
+            checked={loginCoverFlow}
+            disabled={savingLogin}
+            onChange={(on) => saveLoginCoverFlow(on)}
+          />
+        </div>
+      </div>
 
       <div className="divider" />
       <div style={{ fontWeight: 700, marginBottom: 10 }}>书库自动刷新</div>
       <p style={{ fontSize: 12.5, color: 'var(--ink-faint)', lineHeight: 1.6, marginBottom: 12 }}>
         整理文件后重新扫描可自动认回搬家或改名的书。单个书架可在「书库目录管理」开启监控；此处配置定时全库扫描。
       </p>
-      <label style={{ display: 'flex', alignItems: 'center', gap: 10, fontSize: 13.5, marginBottom: 10 }}>
-        <input type="checkbox" checked={scanEnabled} onChange={(e) => setScanEnabled(e.target.checked)} />
-        启用定时扫描全部书库
-      </label>
+      <div className="settings-switch-group">
+        <div className="settings-switch-row">
+          <div className="settings-switch-text">
+            <div className="settings-switch-title">启用定时扫描全部书库</div>
+            <div className="settings-switch-desc">按下方间隔自动扫描全部书架</div>
+          </div>
+          <LabSwitch checked={scanEnabled} onChange={setScanEnabled} />
+        </div>
+      </div>
       <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', marginBottom: 10 }}>
         <label style={{ fontSize: 13, display: 'flex', alignItems: 'center', gap: 8 }}>
           间隔（分钟）
@@ -1187,10 +1273,115 @@ function SystemPanel() {
 
       <div className="divider" />
       <div style={{ fontWeight: 700, marginBottom: 10 }}>数据备份</div>
-      <a className="btn" href={downloadUrl('/api/admin/backup')}>
-        <Download size={15} />
-        导出数据备份（zip）
-      </a>
+      <p style={{ fontSize: 13, color: 'var(--ink-faint)', marginBottom: 12, lineHeight: 1.55 }}>
+        配置备份只含账号偏好、AI 配置与系统设置；全部数据备份含数据库与封面等媒体文件。恢复时会自动识别类型。
+      </p>
+      <div className="backup-actions">
+        <a className="btn" href={downloadUrl('/api/admin/backup/config')}>
+          <Download size={15} />
+          导出配置备份
+        </a>
+        <a className="btn btn-primary" href={downloadUrl('/api/admin/backup/full')}>
+          <Download size={15} />
+          导出全部数据备份
+        </a>
+        <button
+          type="button"
+          className="btn"
+          disabled={restoreBusy}
+          onClick={() => restoreInputRef.current?.click()}
+        >
+          <Upload size={15} />
+          {restoreBusy ? '处理中…' : '恢复备份…'}
+        </button>
+        <input
+          ref={restoreInputRef}
+          type="file"
+          accept=".zip,application/zip"
+          hidden
+          onChange={async (e) => {
+            const file = e.target.files?.[0]
+            e.target.value = ''
+            if (!file) return
+            setRestoreBusy(true)
+            try {
+              const fd = new FormData()
+              fd.append('file', file)
+              const info = await api.upload<{
+                type: string
+                type_label: string
+                app_version?: string
+                created_at?: string
+              }>('/api/admin/backup/inspect', fd)
+              setRestorePreview({
+                file,
+                type: info.type,
+                type_label: info.type_label,
+                app_version: info.app_version,
+                created_at: info.created_at,
+              })
+            } catch (err) {
+              toast.error(err instanceof ApiError ? err.message : '无法识别备份文件')
+            } finally {
+              setRestoreBusy(false)
+            }
+          }}
+        />
+      </div>
+
+      {restorePreview && (
+        <ConfirmDialog
+          title="确认恢复备份"
+          lead={
+            <>
+              已识别为<strong>{restorePreview.type_label}</strong>
+              {restorePreview.app_version ? `（来自 ${restorePreview.app_version}）` : ''}
+              。
+              {restorePreview.type === 'full'
+                ? '全部数据恢复将覆盖当前数据库与媒体文件，请确认已做好准备。'
+                : '配置恢复将写回用户偏好、AI 配置与系统设置，不会删除现有书籍。'}
+            </>
+          }
+          description={
+            restorePreview.created_at ? `备份时间：${restorePreview.created_at}` : undefined
+          }
+          confirmLabel={restorePreview.type === 'full' ? '覆盖并恢复' : '恢复配置'}
+          busyLabel="恢复中…"
+          danger={restorePreview.type === 'full'}
+          busy={restoreBusy}
+          onClose={() => !restoreBusy && setRestorePreview(null)}
+          onConfirm={async () => {
+            const file = restorePreview.file
+            const kind = restorePreview.type
+            setRestoreBusy(true)
+            try {
+              const fd = new FormData()
+              fd.append('file', file)
+              const r = await api.upload<{
+                success: boolean
+                detected_type?: string
+                users?: number
+                app_config?: number
+                message?: string
+              }>('/api/admin/backup/restore', fd)
+              setRestorePreview(null)
+              if (kind === 'full' || r.detected_type === 'full') {
+                toast.success(r.message || '全部数据已恢复，页面即将刷新')
+                window.setTimeout(() => window.location.reload(), 800)
+              } else {
+                toast.success(`配置已恢复：用户 ${r.users ?? 0}，系统项 ${r.app_config ?? 0}`)
+                loadStatus()
+                loadReaderSettings()
+                loadLibraryScanSettings()
+              }
+            } catch (err) {
+              toast.error(err instanceof ApiError ? err.message : '恢复失败')
+            } finally {
+              setRestoreBusy(false)
+            }
+          }}
+        />
+      )}
     </div>
   )
 }

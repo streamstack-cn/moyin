@@ -11,42 +11,70 @@ import {
   ChevronLeft,
   ChevronRight,
   Highlighter,
+  Languages,
   List,
   Maximize,
   Minimize,
   Minus,
   NotebookPen,
-  Palette,
   PanelsTopLeft,
   Plus,
   RectangleHorizontal,
   Search,
+  TextSelect,
+  Type,
   X,
 } from 'lucide-react'
 import { api, ApiError, getToken } from '../api/client'
 import type { BookDetail, BookNote, CitationProject, Highlight } from '../api/types'
+import LabSwitch from '../components/LabSwitch'
 import ReaderBookIdentity from '../components/ReaderBookIdentity'
 import ReaderJournalPanel from '../components/ReaderJournalPanel'
 import ReaderReturnOriginBar from '../components/ReaderReturnOriginBar'
+import ReaderTranslatePanel from '../components/ReaderTranslatePanel'
+import ReaderMidSwipeLayer from '../components/ReaderMidSwipeLayer'
 import SelectionBubble from '../components/SelectionBubble'
 import { useAuth } from '../contexts/AuthContext'
+import { usePinchZoom } from '../hooks/usePinchZoom'
+import { useReaderSelectionTranslate } from '../hooks/useReaderSelectionTranslate'
+import { isReaderPinchBlocking, markTouchGestureMulti } from '../lib/readerGestureGate'
+import { useUISettings } from '../contexts/UISettingsContext'
+import {
+  injectEpubReaderFonts,
+  loadEpubReaderFontFaceCss,
+  prefetchEpubReaderFonts,
+  READER_FONT_OPTIONS,
+  readerFontFamilyCss,
+} from '../lib/readerFonts'
 import { copyTextToClipboard } from '../lib/clipboard'
+import { isAppleTouchDevice } from '../lib/platform'
 import { BASKET_PROJECT_KEY, type SelectionAnchor } from '../lib/readerConstants'
 import {
   clearDomSelection,
-  isIntentionalTextSelection,
+  isAccidentalTapSelection,
   pointerTravel,
   selectionText,
 } from '../lib/readerGestures'
 import {
+  resolveHorizontalSwipe,
+  resolveHorizontalSwipeByTravel,
+  SWIPE_AXIS_RATIO_COMPACT,
+  SWIPE_INTENT_PX,
+  SWIPE_THRESHOLD_COMPACT_PX,
+} from '../lib/readerPageTurnGestures'
+import {
   pointerToViewport,
+  rangeToScreenBounds,
   rangeToSelectionAnchor,
   withPointer,
 } from '../lib/selectionBubblePlacement'
 import { findKeywordRanges } from '../lib/findKeywordRanges'
 import { HighlightedText, highlightTerms } from '../lib/highlightQuery'
+import { isReaderPeekMode } from '../lib/readerDeepLink'
+import { exitReader } from '../lib/exitReader'
 import { useJournalDrawerWidth } from '../lib/useJournalDrawerWidth'
 import { useReaderChromeInset } from '../lib/useReaderChromeInset'
+import { useReaderExitBackGesture } from '../hooks/useReaderExitBackGesture'
 import PdfReaderPage from './PdfReaderPage'
 
 /** EPUB 无固定纸书页码；用字符块生成虚拟页。约 720 字更接近一屏中文阅读量。 */
@@ -81,7 +109,7 @@ const READER_THEMES = [
   { id: 'black', label: '纯黑', bg: '#000000', fg: '#b8b8b8' },
 ]
 
-type DrawerTab = 'toc' | 'notes' | 'search' | 'journal' | null
+type DrawerTab = 'toc' | 'notes' | 'search' | 'journal' | 'translate' | null
 
 interface SelectionState {
   cfiRange: string
@@ -182,6 +210,8 @@ function EpubReaderPage({ bookId }: { bookId: string }) {
   const [currentHref, setCurrentHref] = useState<string>('')
   const currentCfiRef = useRef<string>('')
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  /** true=抑制进度写入（引用/搜索等 peek 深链）；翻页或指定页码后改为 false */
+  const suppressProgressSaveRef = useRef(false)
   const shellRef = useRef<HTMLDivElement>(null)
   const [isFullscreen, setIsFullscreen] = useState(false)
 
@@ -198,7 +228,11 @@ function EpubReaderPage({ bookId }: { bookId: string }) {
   /** 关抽屉后短暂锁定，避免点击穿透把顶底栏又藏掉 */
   const chromeToggleLockUntilRef = useRef(0)
   const toggleChromeRef = useRef(() => {})
-  const isCompactRef = useRef(false)
+  const isCompactRef = useRef(
+    typeof window !== 'undefined' &&
+      (window.matchMedia('(max-width: 860px)').matches ||
+        window.matchMedia('(pointer: coarse)').matches),
+  )
 
   toggleChromeRef.current = () => {
     if (Date.now() < chromeToggleLockUntilRef.current) return
@@ -207,6 +241,8 @@ function EpubReaderPage({ bookId }: { bookId: string }) {
   const selectionRef = useRef<SelectionState | null>(null)
   const bubbleInteractingRef = useRef(false)
   const selectingRef = useRef(false)
+  const selectStartedAtRef = useRef(0)
+  const lastSelectionActivityAtRef = useRef(0)
   const lastPointerClientRef = useRef<{ x: number; y: number } | null>(null)
   const pointerStartRef = useRef<{ x: number; y: number } | null>(null)
   const pointerMovePxRef = useRef(0)
@@ -227,6 +263,26 @@ function EpubReaderPage({ bookId }: { bookId: string }) {
   const wheelEnabledRef = useRef(true)
   const lastWheelAtRef = useRef(0)
   const { user, updatePreferences } = useAuth()
+  const { readerFont, setReaderFont } = useUISettings()
+  /** 移动端划词模式：卸掉中部滑动层，便于选字 */
+  const [midSelectMode, setMidSelectMode] = useState(false)
+  const midSelectPinnedRef = useRef(false)
+  /** 移动端从任意 EPUB contents 尝试弹出 Sheet（供轮询兜底） */
+  const mobilePresentRef = useRef<() => boolean>(() => false)
+  /** 同步 DOM 选区全文到底栏 / 无选区则关闭 */
+  const mobileSyncSelectionRef = useRef<() => void>(() => {})
+  const lastTouchNavAtRef = useRef(0)
+  const lastPresentAtRef = useRef(0)
+  const readerFontRef = useRef(readerFont)
+  readerFontRef.current = readerFont
+  const autoTranslate = user?.preferences?.reader_auto_translate !== false
+  const {
+    bubble: translateBubble,
+    panel: translatePanel,
+    translateNow,
+    openPanelFromBubble,
+    askExplain,
+  } = useReaderSelectionTranslate(selection?.text, autoTranslate)
   const [fontSize, setFontSize] = useState(() => {
     const fromUser = Number(user?.preferences?.reader_font_size)
     if (fromUser >= 70 && fromUser <= 180) return fromUser
@@ -234,18 +290,94 @@ function EpubReaderPage({ bookId }: { bookId: string }) {
     if (fromLocal >= 70 && fromLocal <= 180) return fromLocal
     return 100
   })
-  const [isCompact, setIsCompact] = useState(() =>
-    typeof window !== 'undefined' ? window.matchMedia('(max-width: 860px)').matches : false,
-  )
+  const [isCompact, setIsCompact] = useState(() => {
+    if (typeof window === 'undefined') return false
+    return (
+      window.matchMedia('(max-width: 860px)').matches ||
+      window.matchMedia('(pointer: coarse)').matches
+    )
+  })
   const [canNavBack, setCanNavBack] = useState(false)
   const navStackRef = useRef<string[]>([])
   const turnPrevRef = useRef<() => void>(() => {})
   const turnNextRef = useRef<() => void>(() => {})
   const fontSizeRef = useRef(fontSize)
+  /** 双指缩放时已应用到 epub 的字号，用于步进重排 + 残余 CSS 补间 */
+  const pinchAppliedRef = useRef(fontSize)
+  const [pinchHud, setPinchHud] = useState<number | null>(null)
 
   useEffect(() => {
     selectionRef.current = selection
   }, [selection])
+
+  useEffect(() => {
+    if (selection) setMidSelectMode(true)
+  }, [selection])
+
+  // 有选区时强制露出底栏，功能条嵌在进度/页码区域
+  useEffect(() => {
+    if (selection && isCompact) setChromeVisible(true)
+  }, [selection, isCompact])
+
+  const [selectionChromeEl, setSelectionChromeEl] = useState<HTMLDivElement | null>(null)
+
+  // 无选区时超时退出划词；有选区则保持；顶栏开关钉住时不自动退出
+  useEffect(() => {
+    if (selection || !midSelectMode || midSelectPinnedRef.current) return
+    const t = window.setTimeout(() => setMidSelectMode(false), 8000)
+    return () => window.clearTimeout(t)
+  }, [selection, midSelectMode])
+
+  /**
+   * 兜底：iOS/Android 长按选词后常丢 pointerup。
+   * 须等选区安静一段时间再补弹，避免拖手柄时气泡抢戏。
+   */
+  useEffect(() => {
+    if (!isCompact) return
+    if (!midSelectMode && !selection) return
+    const quietMs = isAppleTouchDevice() ? 900 : 700
+    const tick = () => {
+      if (Date.now() - lastTouchNavAtRef.current < 400) return
+      if (selectionRef.current) {
+        // 已有底栏：持续同步全文，并在 DOM 选区消失后关闭
+        mobileSyncSelectionRef.current()
+        return
+      }
+      if (Date.now() - lastSelectionActivityAtRef.current < quietMs) return
+      mobilePresentRef.current()
+    }
+    const id = window.setInterval(tick, 280)
+    return () => window.clearInterval(id)
+  }, [isCompact, midSelectMode, selection])
+
+  function enterAnnotateMode(opts?: { pinned?: boolean; toast?: boolean }) {
+    setMidSelectMode(true)
+    if (opts?.pinned) midSelectPinnedRef.current = true
+    if (opts?.toast !== false) {
+      toast.message('划词已开启：请再长按文字拖选', {
+        id: 'moyin-annotate-mode',
+        duration: 2200,
+        icon: null,
+      })
+    }
+  }
+
+  function exitAnnotateMode() {
+    midSelectPinnedRef.current = false
+    setMidSelectMode(false)
+  }
+
+  function toggleAnnotateMode() {
+    if (midSelectMode && midSelectPinnedRef.current) {
+      exitAnnotateMode()
+      return
+    }
+    if (midSelectMode && !selection) {
+      exitAnnotateMode()
+      return
+    }
+    enterAnnotateMode({ pinned: true })
+  }
 
   useEffect(() => {
     chromeVisibleRef.current = chromeVisible
@@ -255,46 +387,32 @@ function EpubReaderPage({ bookId }: { bookId: string }) {
     fontSizeRef.current = fontSize
   }, [fontSize])
 
+  // 尽早把自定义字体打成 data-URI，避免 EPUB iframe 跨域拦截
+  useEffect(() => {
+    prefetchEpubReaderFonts()
+  }, [])
+
   useReaderChromeInset(shellRef)
+  useReaderExitBackGesture(shellRef, navigate, isCompact)
   const { width: journalWidth, onResizePointerDown: onJournalResizePointerDown } = useJournalDrawerWidth()
 
-  // 字号或阅读区尺寸变化时重排；顶栏显隐保持占位，避免内容跳顶
   useEffect(() => {
-    const r = renditionRef.current
-    const el = viewerRef.current
-    if (!r || !el) return
-    let timer = 0
-    const resize = () => {
-      try {
-        r.themes.fontSize(`${fontSizeRef.current}%`)
-        r.resize(el.clientWidth, el.clientHeight)
-      } catch {
-        /* ignore */
-      }
-    }
-    timer = window.setTimeout(resize, 80)
-    const ro = new ResizeObserver(() => {
-      window.clearTimeout(timer)
-      timer = window.setTimeout(resize, 50)
-    })
-    ro.observe(el)
-    return () => {
-      window.clearTimeout(timer)
-      ro.disconnect()
-    }
-  }, [fontSize])
-
-  useEffect(() => {
-    const mq = window.matchMedia('(max-width: 860px)')
+    const mqWidth = window.matchMedia('(max-width: 860px)')
+    const mqTouch = window.matchMedia('(pointer: coarse)')
     const sync = () => {
-      isCompactRef.current = mq.matches
-      setIsCompact(mq.matches)
+      const compact = mqWidth.matches || mqTouch.matches
+      isCompactRef.current = compact
+      setIsCompact(compact)
       // 移动端固定 A4 版式，不提供全宽切换
-      if (mq.matches) setLayoutMode('a4')
+      if (mqWidth.matches) setLayoutMode('a4')
     }
     sync()
-    mq.addEventListener('change', sync)
-    return () => mq.removeEventListener('change', sync)
+    mqWidth.addEventListener('change', sync)
+    mqTouch.addEventListener('change', sync)
+    return () => {
+      mqWidth.removeEventListener('change', sync)
+      mqTouch.removeEventListener('change', sync)
+    }
   }, [])
 
   useEffect(() => {
@@ -329,6 +447,7 @@ function EpubReaderPage({ bookId }: { bookId: string }) {
     (keyword: string, opts?: { refineToKeyword?: boolean; durationMs?: number }) => Promise<number>
   >(async () => 0)
   const [loading, setLoading] = useState(true)
+
   const [noteContent, setNoteContent] = useState('')
   const [noteSaveState, setNoteSaveState] = useState<'idle' | 'saving' | 'saved'>('idle')
   const [journalMode, setJournalMode] = useState<'edit' | 'preview'>('edit')
@@ -336,6 +455,85 @@ function EpubReaderPage({ bookId }: { bookId: string }) {
   const [layoutMode, setLayoutMode] = useState<'full' | 'a4'>(
     () => (localStorage.getItem('moyin_reader_layout') as 'full' | 'a4') || 'full',
   )
+
+  // 字号或阅读区尺寸变化时重排；顶栏显隐保持占位，避免内容跳顶
+  useEffect(() => {
+    const r = renditionRef.current
+    const el = viewerRef.current
+    if (!r || !el) return
+    let timer = 0
+    const resize = () => {
+      try {
+        r.themes.fontSize(`${fontSizeRef.current}%`)
+        r.resize(el.clientWidth, el.clientHeight)
+      } catch {
+        /* ignore */
+      }
+    }
+    timer = window.setTimeout(resize, 80)
+    const ro = new ResizeObserver(() => {
+      window.clearTimeout(timer)
+      timer = window.setTimeout(resize, 50)
+    })
+    ro.observe(el)
+    return () => {
+      window.clearTimeout(timer)
+      ro.disconnect()
+    }
+  }, [fontSize, layoutMode])
+
+  /**
+   * 全宽↔A4 / 进入退出浏览器全屏后，epub.js 分栏偶发保留旧偏移（正文左切）。
+   * 仅靠 ResizeObserver 的 resize 不够，需等 CSS 落稳后 resize + 回到当前 CFI。
+   */
+  useEffect(() => {
+    const r = renditionRef.current
+    const el = viewerRef.current
+    if (!r || !el || loading) return
+    let cancelled = false
+    const timers: number[] = []
+
+    const reflow = () => {
+      if (cancelled) return
+      const w = el.clientWidth
+      const h = el.clientHeight
+      if (w < 40 || h < 40) return
+      try {
+        r.themes.fontSize(`${fontSizeRef.current}%`)
+        r.resize(w, h)
+      } catch {
+        return
+      }
+      const cfi = currentCfiRef.current
+      if (!cfi) return
+      try {
+        void r.display(cfi)
+      } catch {
+        /* ignore */
+      }
+    }
+
+    const schedule = (ms: number) => {
+      timers.push(
+        window.setTimeout(() => {
+          requestAnimationFrame(() => {
+            requestAnimationFrame(reflow)
+          })
+        }, ms),
+      )
+    }
+    // 全屏退出有过渡；A4 max-width 也要等一帧布局
+    schedule(0)
+    schedule(80)
+    schedule(200)
+    schedule(400)
+
+    return () => {
+      cancelled = true
+      for (const t of timers) window.clearTimeout(t)
+    }
+  }, [layoutMode, isFullscreen, loading])
+
   // 优先使用账号级偏好（跨设备同步），登录前/未设置过时回退到本机 localStorage 缓存
   const [readerThemeId, setReaderThemeId] = useState(
     () => user?.preferences?.reader_theme || localStorage.getItem('moyin_reader_theme') || 'paper',
@@ -389,23 +587,30 @@ function EpubReaderPage({ bookId }: { bookId: string }) {
     async function init() {
       setLoading(true)
       try {
-        const [detail, hs, projs, progress, note] = await Promise.all([
+        // 关键路径：详情 + 进度先到即可开书；高亮/引用篮/笔记并行侧载，不阻塞首屏
+        const [detail, progress] = await Promise.all([
           api.get<BookDetail>(`/api/books/${bookId}`),
-          api.get<Highlight[]>(`/api/highlights/book/${bookId}`),
-          api.get<CitationProject[]>('/api/citation/projects'),
           api.get<{ location: string; percent: number }>(`/api/books/${bookId}/progress`),
-          api.get<BookNote>(`/api/notes/${bookId}`).catch(() => ({ content: '' }) as BookNote),
         ])
         if (cancelled) return
         setBook(detail)
         metaPageCountRef.current = Number(detail.page_count) || 0
-        setHighlights(hs)
-        setProjects(projs)
-        setBasketProjectId(pickDefaultBasketProjectId(projs))
         // 后端存的是 0~1 小数；历史数据偶发存成 0~100，这里兼容两种
         const rawPct = Number(progress.percent) || 0
         setPercent(Math.round(rawPct <= 1 ? rawPct * 100 : rawPct))
-        setNoteContent(note.content || '')
+
+        const sideLoad = Promise.all([
+          api.get<Highlight[]>(`/api/highlights/book/${bookId}`).catch(() => [] as Highlight[]),
+          api.get<CitationProject[]>('/api/citation/projects').catch(() => [] as CitationProject[]),
+          api.get<BookNote>(`/api/notes/${bookId}`).catch(() => ({ content: '' }) as BookNote),
+        ]).then(([hs, projs, note]) => {
+          if (cancelled) return [] as Highlight[]
+          setHighlights(hs)
+          setProjects(projs)
+          setBasketProjectId(pickDefaultBasketProjectId(projs))
+          setNoteContent(note.content || '')
+          return hs
+        })
 
         const token = getToken()
         const epub = ePub(`/api/books/${bookId}/read`, {
@@ -439,20 +644,30 @@ function EpubReaderPage({ bookId }: { bookId: string }) {
         localRendition = rendition
         renditionRef.current = rendition
         const themeColors = resolveReaderTheme(readerThemeId, customBg)
+        const bodyFont = readerFontFamilyCss(readerFontRef.current)
+        const iframeTouchAction = isAppleTouchDevice() ? 'manipulation' : 'pan-y pinch-zoom'
         rendition.themes.default({
           '::selection': { background: 'rgba(216,169,78,0.35)' },
+          html: {
+            /* iOS：manipulation 避免 pan-y 抢走选区手柄；Android 保留纵向翻页手势空间 */
+            'touch-action': iframeTouchAction,
+          },
           body: {
-            'font-family': "'Noto Serif SC', serif !important",
+            'font-family': `${bodyFont} !important`,
             background: `${themeColors.bg} !important`,
             color: `${themeColors.fg} !important`,
             /* iOS 需显式允许选字，否则划词无选区、气泡出不来 */
             '-webkit-user-select': 'text !important',
             'user-select': 'text !important',
-            '-webkit-touch-callout': 'default !important',
+            /* 减弱 iOS 系统划词菜单，改走自研底栏操作条 */
+            '-webkit-touch-callout': 'none !important',
+            'touch-action': iframeTouchAction,
           },
           'p, div, span, li, td, th, h1, h2, h3, h4, h5, h6, a': {
+            'font-family': `${bodyFont} !important`,
             '-webkit-user-select': 'text !important',
             'user-select': 'text !important',
+            '-webkit-touch-callout': 'none !important',
             color: `${themeColors.fg} !important`,
           },
         })
@@ -465,36 +680,48 @@ function EpubReaderPage({ bookId }: { bookId: string }) {
         setCanNavBack(false)
 
         // 从搜索结果点进来时，直接定位到对应高亮所在位置（该处本身已有高亮底色标记）
-        // 失效 CFI 会导致 display 挂起，加超时并回退到首页
+        // 失效 CFI 会导致 display 挂起，加超时；失败时必须用百分比续读，绝不能默默回到开头并写回 0%
         // restart=1：重新阅读，忽略已存进度并从开头开始
         // EPUB 忽略误传的 pdf: 定位（常见于只有纸书页码的旧引用）
         const rawJump = (searchParams.get('cfi') || '').trim()
         const jumpCfi = rawJump.startsWith('pdf:') ? '' : rawJump
         const restart = searchParams.get('restart') === '1'
-        const target = jumpCfi || (restart ? undefined : progress.location) || undefined
+        const peekMode = isReaderPeekMode(searchParams)
+        // 引用 / 搜索等定位进入：先不写进度，等用户主动翻页或改页后再记
+        // 恢复进度期间也必须抑制写入，否则失败回退首页会把 26% 覆盖成 0%
+        const restoringRef = { current: true }
+        suppressProgressSaveRef.current = peekMode || !restart
+        const savedLoc = restart ? '' : String(progress.location || '').trim()
+        const savedPctRaw = Number(progress.percent) || 0
+        const savedPct = savedPctRaw > 1.5 ? savedPctRaw / 100 : savedPctRaw
         const displayWithTimeout = (loc?: string) =>
           Promise.race([
             rendition.display(loc),
             new Promise((_, reject) => setTimeout(() => reject(new Error('display timeout')), 8000)),
           ])
-        try {
-          await displayWithTimeout(target)
-        } catch {
-          if (target) {
-            try {
-              await displayWithTimeout(undefined)
-            } catch {
-              /* ignore */
-            }
+
+        const tryDisplay = async (loc?: string) => {
+          if (!loc) {
+            await displayWithTimeout(undefined)
+            return true
+          }
+          try {
+            await displayWithTimeout(loc)
+            return true
+          } catch {
+            return false
           }
         }
-        if (cancelled) return
 
         epub.loaded.navigation.then((nav) => {
           if (!cancelled) setToc(nav.toc)
         })
 
-        hs.forEach(applyHighlightAnnotation)
+        // 高亮等侧数据返回后再挂注解（不挡首屏 display）
+        void sideLoad.then((hs) => {
+          if (cancelled || !hs?.length) return
+          hs.forEach(applyHighlightAnnotation)
+        })
 
         const readPercentage = (cfi?: string, fallback = 0) => {
           if (cfi && epub.locations.length() > 0) {
@@ -566,7 +793,7 @@ function EpubReaderPage({ bookId }: { bookId: string }) {
         }
 
         // 生成/加载 locations（进度百分比依赖它）；页码优先用 page-list / 元数据估算。
-        const bootLocations = async () => {
+        const ensureLocations = async () => {
           try {
             await epub.ready
             if (cancelled) return
@@ -575,28 +802,25 @@ function EpubReaderPage({ bookId }: { bookId: string }) {
             } catch {
               /* 多数 EPUB 无 page-list */
             }
+            if (epub.locations.length() > 0) return
             const cached = loadCachedEpubLocations(bookId)
             if (cached) {
               epub.locations.load(cached)
-            } else {
-              setPagesBuilding(true)
-              ;(epub.locations as unknown as { pause: number }).pause = 1
-              await epub.locations.generate(EPUB_LOC_CHARS)
-              if (cancelled) return
-              if (epub.locations.length() > 0) {
-                saveCachedEpubLocations(bookId, epub.locations.save())
-              }
+              return
             }
+            setPagesBuilding(true)
+            ;(epub.locations as unknown as { pause: number }).pause = 1
+            await epub.locations.generate(EPUB_LOC_CHARS)
             if (cancelled) return
-            const cur = rendition.currentLocation() as unknown as { start?: { cfi: string; percentage?: number } }
-            syncPageFromCfi(cur?.start?.cfi, cur?.start?.percentage || 0)
+            if (epub.locations.length() > 0) {
+              saveCachedEpubLocations(bookId, epub.locations.save())
+            }
           } catch (err) {
             console.warn('EPUB 页码索引生成失败', err)
           } finally {
             if (!cancelled) setPagesBuilding(false)
           }
         }
-        void bootLocations()
 
         rendition.on(
           'relocated',
@@ -616,9 +840,12 @@ function EpubReaderPage({ bookId }: { bookId: string }) {
               }
               setPercent(Math.round((location.start.percentage || 0) * 100))
             }
+            // 恢复定位中禁止写回，避免 CFI 失败落到首页后把原进度覆盖成 0%
+            if (restoringRef.current || suppressProgressSaveRef.current) return
             const pctForSave = readPercentage(location.start.cfi, location.start.percentage)
             if (saveTimerRef.current) clearTimeout(saveTimerRef.current)
             saveTimerRef.current = setTimeout(() => {
+              if (restoringRef.current || suppressProgressSaveRef.current) return
               api
                 .put(`/api/books/${bookId}/progress`, {
                   location: location.start.cfi,
@@ -628,6 +855,84 @@ function EpubReaderPage({ bookId }: { bookId: string }) {
             }, 800)
           },
         )
+
+        // 续读优先级：深链 CFI → 已存 CFI → 已存百分比（仅用缓存）→ 开头
+        // 注意：无 locations 缓存时绝不在首屏 await generate（安卓上极慢），先出书再后台定位
+        let restored = false
+        let pendingPctRelocate = false
+        let openedFallbackStart = false
+        try {
+          if (jumpCfi) {
+            restored = await tryDisplay(jumpCfi)
+          } else if (!restart) {
+            const cfiLike = savedLoc.includes('epubcfi') || savedLoc.startsWith('epubcfi')
+            if (cfiLike) {
+              restored = await tryDisplay(savedLoc)
+            }
+            if (!restored && savedPct >= 0.005) {
+              const cached = loadCachedEpubLocations(bookId)
+              if (cached) {
+                try {
+                  epub.locations.load(cached)
+                  const fromPct = epub.locations.cfiFromPercentage(Math.min(0.999, Math.max(0, savedPct)))
+                  if (fromPct) restored = await tryDisplay(fromPct)
+                } catch {
+                  /* ignore */
+                }
+              } else {
+                pendingPctRelocate = true
+              }
+            }
+          }
+          if (!cancelled && !restored) {
+            await tryDisplay(undefined)
+            openedFallbackStart = true
+          }
+        } finally {
+          // 首屏已渲染：立刻结束 loading，后续索引/手势注册不挡阅读
+          if (!cancelled) setLoading(false)
+          if (!cancelled) {
+            restoringRef.current = false
+            if (peekMode) {
+              suppressProgressSaveRef.current = true
+            } else if (pendingPctRelocate) {
+              // 后台补定位期间暂不写进度，避免先落到开头把原进度冲掉
+              suppressProgressSaveRef.current = true
+            } else if (
+              openedFallbackStart &&
+              !restart &&
+              (savedPct >= 0.005 || Boolean(savedLoc))
+            ) {
+              // 续读失败落到开头：保留库里的旧进度，等用户主动翻页后再写
+              suppressProgressSaveRef.current = true
+              toast.message('未能精确恢复上次位置，已打开开头（原进度仍保留）')
+            } else {
+              suppressProgressSaveRef.current = false
+            }
+          }
+        }
+        if (cancelled) return
+
+        // 页码索引后台补齐；无缓存的百分比续读在此生成后跳转
+        void ensureLocations().then(async () => {
+          if (cancelled) return
+          if (pendingPctRelocate && epub.locations.length() > 0) {
+            try {
+              const fromPct = epub.locations.cfiFromPercentage(Math.min(0.999, Math.max(0, savedPct)))
+              if (fromPct) {
+                restoringRef.current = true
+                await tryDisplay(fromPct)
+                restoringRef.current = false
+                if (!peekMode) suppressProgressSaveRef.current = false
+              }
+            } catch {
+              if (!peekMode) suppressProgressSaveRef.current = true
+            }
+          }
+          if (cancelled) return
+          const cur = rendition.currentLocation() as unknown as { start?: { cfi: string; percentage?: number } }
+          syncPageFromCfi(cur?.start?.cfi, cur?.start?.percentage || savedPct)
+        })
 
         const resolveSelectionAnchor = (
           range: Range,
@@ -641,10 +946,13 @@ function EpubReaderPage({ bookId }: { bookId: string }) {
             const offsetLeft = (iframeRect?.left || 0) - (wrapRect?.left || 0)
             const offsetTop = (iframeRect?.top || 0) - (wrapRect?.top || 0)
             const base = rangeToSelectionAnchor(range, { left: offsetLeft, top: offsetTop })
+            const screen = rangeToScreenBounds(range, iframe)
             const pointer = pointerClient
               ? pointerToViewport(pointerClient.x, pointerClient.y, wrapRect || undefined)
               : null
-            return withPointer(base, pointer)
+            const withPtr = withPointer(base, pointer)
+            if (!withPtr) return screen ? { x: screen.midX, y: screen.top, height: screen.bottom - screen.top, screen } : null
+            return { ...withPtr, screen: screen || undefined }
           } catch {
             return null
           }
@@ -657,43 +965,89 @@ function EpubReaderPage({ bookId }: { bookId: string }) {
         }
 
         let lastPresentAt = 0
-        const presentSelectionFromContents = (
+        type CapturedSel = { text: string; range: Range | null; cfi: string }
+        const captureSelection = (contents: ContentsLike): CapturedSel | null => {
+          try {
+            const sel = contents.window.getSelection()
+            if (!sel || sel.rangeCount === 0 || sel.isCollapsed) return null
+            let range: Range | null = null
+            try {
+              range = sel.getRangeAt(0).cloneRange()
+            } catch {
+              range = null
+            }
+            // iOS 上 sel.toString() 有时只返回首段；与 range 取更长者
+            const fromSel = sel.toString().trim()
+            const fromRange = range?.toString().trim() || ''
+            const text = fromRange.length > fromSel.length ? fromRange : fromSel
+            if (!text) return null
+            let cfi = ''
+            if (range) {
+              try {
+                cfi = contents.cfiFromRange(range) || ''
+              } catch {
+                cfi = ''
+              }
+            }
+            return { text, range, cfi }
+          } catch {
+            return null
+          }
+        }
+        /** 可用快照弹出面板：不依赖 settle 时 DOM 仍有选区（iOS 常已清空） */
+        const presentCapturedSelection = (
           contents: ContentsLike,
-          cfiHint?: string,
+          captured: CapturedSel,
           force = false,
           pointerClient?: { x: number; y: number } | null,
         ) => {
-          // 划词未结束：不弹气泡，避免挡继续拖选
           if (!force && selectingRef.current) return false
-          const sel = contents.window.getSelection()
-          const text = sel?.toString().trim() || ''
-          if (!text || !sel || sel.rangeCount === 0) return false
-          if (!force && !isIntentionalTextSelection(text, pointerMovePxRef.current)) {
+          const text = captured.text.trim()
+          if (!text) return false
+          const gestureMs = selectStartedAtRef.current
+            ? Date.now() - selectStartedAtRef.current
+            : undefined
+          if (!force && isAccidentalTapSelection(text, pointerMovePxRef.current, gestureMs)) {
             clearDomSelection(contents.window)
             return false
           }
-          // 与 mouseup/selected 去重
           if (!force && Date.now() - lastPresentAt < 50 && selectionRef.current?.text === text) {
             return true
           }
-          let cfiRange = cfiHint || ''
+          let cfiRange = captured.cfi || ''
           let anchor: SelectionAnchor | null = null
-          try {
-            const range = sel.getRangeAt(0)
-            if (!cfiRange) {
-              try {
-                cfiRange = contents.cfiFromRange(range) || ''
-              } catch {
-                cfiRange = ''
+          const ptr = pointerClient ?? lastPointerClientRef.current
+          if (captured.range) {
+            try {
+              if (!cfiRange) {
+                try {
+                  cfiRange = contents.cfiFromRange(captured.range) || ''
+                } catch {
+                  cfiRange = ''
+                }
               }
+              anchor = resolveSelectionAnchor(captured.range, contents, ptr)
+            } catch {
+              anchor = null
             }
-            // 桌面贴选区末端/指针右下；移动端贴底（anchor=null → fallback）
-            if (!isCompactRef.current) {
-              const ptr = pointerClient ?? lastPointerClientRef.current
-              anchor = resolveSelectionAnchor(range, contents, ptr)
+          }
+          // 底部 sheet 不依赖锚点几何；给占位避免桌面 bar 完全无定位
+          if (!anchor) {
+            const wrap = viewerWrapRef.current?.getBoundingClientRect()
+            const midX = (wrap?.width || 320) / 2
+            const midY = (wrap?.height || 480) * 0.4
+            anchor = {
+              x: midX,
+              y: midY,
+              height: 20,
+              screen: {
+                top: midY,
+                bottom: midY + 20,
+                left: midX - 40,
+                right: midX + 40,
+                midX,
+              },
             }
-          } catch {
-            anchor = null
           }
           setActiveHighlight(null)
           if (pageSourceRef.current !== 'virtual' && currentPageRef.current > 0) {
@@ -702,11 +1056,23 @@ function EpubReaderPage({ bookId }: { bookId: string }) {
             setBasketPage('')
           }
           const nextSel = { cfiRange: cfiRange || `mobile-${Date.now()}`, text, anchor }
-          // 同步写入 ref，避免紧随其后的 click 因 state 未提交而误关气泡
           selectionRef.current = nextSel
           lastPresentAt = Date.now()
+          lastPresentAtRef.current = lastPresentAt
+          if (isCompactRef.current) setChromeVisible(true)
           setSelection(nextSel)
           return true
+        }
+        const presentSelectionFromContents = (
+          contents: ContentsLike,
+          cfiHint?: string,
+          force = false,
+          pointerClient?: { x: number; y: number } | null,
+        ) => {
+          const captured = captureSelection(contents)
+          if (!captured) return false
+          if (cfiHint) captured.cfi = cfiHint
+          return presentCapturedSelection(contents, captured, force, pointerClient)
         }
 
         rendition.on(
@@ -714,12 +1080,28 @@ function EpubReaderPage({ bookId }: { bookId: string }) {
           (cfiRange: string, contents: ContentsLike) => {
             // 拖选过程中 epub.js 也会触发 selected；等 pointerup 再出
             if (selectingRef.current) return
+            // 移动端改走 selectionchange settle，避免选未定就弹横条
+            if (isCompactRef.current) return
             presentSelectionFromContents(contents, cfiRange)
           },
         )
 
-        // 右键 / 触摸选区 / 脚注内链 / iframe 内点按
-        rendition.hooks.content.register((contents: ContentsLike) => {
+        // 触摸导航时间戳（content hook 与后文 click 共用，需提前声明）
+        let lastTouchNavAt = 0
+
+        // 右键 / 触摸选区 / 脚注内链 / iframe 内点按 / 左右滑翻页
+        // 注意：display() 已在上方完成。hooks.content 对「已加载章节」不会补触发，
+        // 必须用具名函数 + getContents() 补绑，否则移动端只有系统选区菜单、没有墨引 Sheet。
+        const selectionBoundDocs = new WeakSet<Document>()
+        const attachSelectionHandlers = (contents: ContentsLike) => {
+          if (!contents?.document || !contents.window) return
+          if (selectionBoundDocs.has(contents.document)) return
+          // EPUB iframe 独立文档，需单独注入自定义字体
+          try {
+            injectEpubReaderFonts(contents.document)
+          } catch {
+            /* ignore */
+          }
           const onContextMenu = (event: MouseEvent) => {
             const text = selectionText(contents.window)
             if (!text) return
@@ -731,19 +1113,167 @@ function EpubReaderPage({ bookId }: { bookId: string }) {
           }
           let clearTimer: ReturnType<typeof setTimeout> | null = null
           let showTimer: ReturnType<typeof setTimeout> | null = null
+          /** 选区文本稳定一段时间后再弹，避免拖选/拖手柄时挡手 */
+          const SELECTION_SETTLE_MS = 520
           const dismissOpenBubble = () => {
             if (!selectionRef.current) return
             selectionRef.current = null
             setSelection(null)
             setBasketPage('')
+            selectingRef.current = false
+            bubbleInteractingRef.current = false
+            lastSelectionActivityAtRef.current = 0
+            // 关闭底栏时退出临时划词，恢复中部翻页层（顶栏钉住除外）
+            if (!midSelectPinnedRef.current) setMidSelectMode(false)
+          }
+          const clearSettleTimer = () => {
+            if (showTimer) {
+              clearTimeout(showTimer)
+              showTimer = null
+            }
+          }
+          /** iOS 常在 touchend 之后才写好选区：短重试。移动端不清 DOM，避免与系统菜单/手柄竞态把 Sheet 冲掉 */
+          const tryPresentSelection = (retriesLeft: number) => {
+            if (Date.now() - lastTouchNavAt < 400) return false
+            const captured = captureSelection(contents)
+            if (captured) {
+              selectingRef.current = false
+              return presentCapturedSelection(
+                contents,
+                captured,
+                true,
+                lastPointerClientRef.current,
+              )
+            }
+            if (retriesLeft > 0) {
+              window.setTimeout(() => tryPresentSelection(retriesLeft - 1), 80)
+            }
+            return false
+          }
+          const pickLongestCapture = (): { contents: ContentsLike; captured: CapturedSel } | null => {
+            let best: { contents: ContentsLike; captured: CapturedSel } | null = null
+            try {
+              const raw = rendition.getContents?.() as unknown
+              const list = (Array.isArray(raw) ? raw : raw ? [raw] : []) as ContentsLike[]
+              for (const c of list) {
+                const captured = captureSelection(c)
+                if (!captured) continue
+                if (!best || captured.text.length > best.captured.text.length) {
+                  best = { contents: c, captured }
+                }
+              }
+            } catch {
+              /* ignore */
+            }
+            if (!best) {
+              const captured = captureSelection(contents)
+              if (captured) best = { contents, captured }
+            }
+            return best
+          }
+          const presentFromAnyContents = (): boolean => {
+            if (Date.now() - lastTouchNavAt < 400) return false
+            const best = pickLongestCapture()
+            if (!best) return tryPresentSelection(0)
+            selectingRef.current = false
+            return presentCapturedSelection(
+              best.contents,
+              best.captured,
+              true,
+              lastPointerClientRef.current,
+            )
+          }
+          const syncSelectionFromDom = () => {
+            const best = pickLongestCapture()
+            if (best) {
+              lastSelectionActivityAtRef.current = Date.now()
+              if (!selectionRef.current || selectionRef.current.text !== best.captured.text) {
+                selectingRef.current = false
+                presentCapturedSelection(
+                  best.contents,
+                  best.captured,
+                  true,
+                  lastPointerClientRef.current,
+                )
+              }
+              return
+            }
+            // DOM 已无选区：关闭底栏（刚弹出的极短窗口除外，防 iOS 闪断）
+            if (!selectionRef.current) return
+            if (Date.now() - lastPresentAtRef.current < 280) return
+            if (bubbleInteractingRef.current) {
+              // 点底栏按钮时短暂 interacting，不因此卡住关闭；超时仍关
+              if (Date.now() - lastPresentAtRef.current < 1200) return
+            }
+            dismissOpenBubble()
+          }
+          mobilePresentRef.current = presentFromAnyContents
+          mobileSyncSelectionRef.current = syncSelectionFromDom
+          // 调试探针：真机/自动化验收用；不影响生产 UI
+          try {
+            ;(window as unknown as { __moyinPresent?: () => boolean }).__moyinPresent =
+              presentFromAnyContents
+            ;(window as unknown as { __moyinSelDebug?: () => Record<string, unknown> }).__moyinSelDebug =
+              () => {
+                const captured = captureSelection(contents)
+                return {
+                  compact: isCompactRef.current,
+                  selecting: selectingRef.current,
+                  hasReactSel: Boolean(selectionRef.current),
+                  domText: selectionText(contents.window),
+                  captured: captured?.text?.slice(0, 40) || null,
+                  lastTouchNavAge: Date.now() - lastTouchNavAt,
+                  midSelect: midSelectPinnedRef.current,
+                }
+              }
+          } catch {
+            /* ignore */
+          }
+
+          const scheduleSettledPresent = () => {
+            clearSettleTimer()
+            if (Date.now() - lastTouchNavAt < 400) return
+            if (isCompactRef.current) {
+              // 选区稳定后再弹：拖选/拖手柄时 selectionchange 会不断重置计时
+              // iOS 要更久，否则气泡过早挡住继续扩选
+              const settleMs = isAppleTouchDevice() ? 880 : 680
+              showTimer = setTimeout(() => {
+                showTimer = null
+                if (bubbleInteractingRef.current) return
+                if (Date.now() - lastTouchNavAt < 400) return
+                const quiet = Date.now() - lastSelectionActivityAtRef.current
+                // 选区仍在变化：继续等；若 selectingRef 卡住但选区已静，照常弹出
+                if (quiet < settleMs - 40) {
+                  scheduleSettledPresent()
+                  return
+                }
+                selectingRef.current = false
+                if (!presentFromAnyContents()) tryPresentSelection(10)
+              }, settleMs)
+              return
+            }
+            const captured = captureSelection(contents)
+            if (!captured) return
+            showTimer = setTimeout(() => {
+              showTimer = null
+              if (selectingRef.current) return
+              if (bubbleInteractingRef.current) return
+              if (Date.now() - lastTouchNavAt < 400) return
+              const live = captureSelection(contents)
+              presentCapturedSelection(contents, live || captured, true, lastPointerClientRef.current)
+            }, SELECTION_SETTLE_MS)
           }
           const onPointerDownTrack = (e: PointerEvent) => {
             selectingRef.current = true
+            selectStartedAtRef.current = Date.now()
             pointerStartRef.current = { x: e.clientX, y: e.clientY }
             lastPointerClientRef.current = { x: e.clientX, y: e.clientY }
             pointerMovePxRef.current = 0
-            // 新一轮划词：先收起旧气泡，避免挡选
-            if (!bubbleInteractingRef.current) dismissOpenBubble()
+            clearSettleTimer()
+            if (bubbleInteractingRef.current) return
+            // 移动端功能条在底栏，不挡正文：拖动手柄时保留，避免 iOS 选区被拆掉重建
+            if (isCompactRef.current) return
+            dismissOpenBubble()
           }
           const onPointerMoveTrack = (e: PointerEvent) => {
             lastPointerClientRef.current = { x: e.clientX, y: e.clientY }
@@ -792,59 +1322,177 @@ function EpubReaderPage({ bookId }: { bookId: string }) {
             if (delay <= 0) run()
             else window.setTimeout(run, delay)
           }
+          const anyContentsHasSelection = () => {
+            if (selectionText(contents.window)) return true
+            try {
+              const raw = rendition.getContents?.() as unknown
+              const list = (Array.isArray(raw) ? raw : raw ? [raw] : []) as ContentsLike[]
+              for (const c of list) {
+                if (selectionText(c.window)) return true
+              }
+            } catch {
+              /* ignore */
+            }
+            return false
+          }
           const onSelectionChange = () => {
             const text = selectionText(contents.window)
             if (text) {
+              lastSelectionActivityAtRef.current = Date.now()
+              if (!selectStartedAtRef.current) selectStartedAtRef.current = Date.now()
               if (clearTimer) {
                 clearTimeout(clearTimer)
                 clearTimer = null
               }
-              // 桌面：划词中不弹，等 pointerup；移动端手柄拖动后防抖刷新
-              if (!isCompactRef.current) return
-              if (selectingRef.current) return
-              if (showTimer) clearTimeout(showTimer)
-              showTimer = setTimeout(() => {
-                showTimer = null
-                presentSelectionFromContents(contents)
-              }, 320)
+              if (isCompactRef.current) {
+                // 底栏已开：取各 iframe 最长选区立刻同步；未开则 settle 后再出
+                if (selectionRef.current) {
+                  syncSelectionFromDom()
+                } else {
+                  scheduleSettledPresent()
+                }
+                return
+              }
+              // 桌面：手指仍在拖选时只藏气泡
+              if (selectingRef.current) {
+                if (!bubbleInteractingRef.current) dismissOpenBubble()
+                return
+              }
+              // 手柄调整导致选区变化：先收起功能条，待稳定后再出（保留选区）
+              if (selectionRef.current && selectionRef.current.text !== text) {
+                dismissOpenBubble()
+              }
+              scheduleSettledPresent()
               return
             }
-            if (showTimer) {
-              clearTimeout(showTimer)
-              showTimer = null
-            }
-            // 刚弹出气泡的短时间内，忽略选区被清空（mouseup/click 常会清掉）
-            if (Date.now() - lastPresentAt < 600) return
-            // 移动端：选区被系统清掉后仍保留气泡
-            if (isCompactRef.current) return
+            clearSettleTimer()
+            // 取消选中必须关掉气泡。刚弹出时系统可能瞬间清空选区，延迟到 keep 窗口后再确认
             if (!selectionRef.current) return
             if (clearTimer) clearTimeout(clearTimer)
+            const keepMs = isAppleTouchDevice() ? 360 : 220
+            const age = Date.now() - lastPresentAt
+            const delay = Math.max(100, keepMs - age + 30)
             clearTimer = setTimeout(() => {
               clearTimer = null
-              if (Date.now() - lastPresentAt < 600) return
-              if (bubbleInteractingRef.current) return
-              if (selectionText(contents.window)) return
-              if (document.querySelector('.selection-menu:hover, .selection-menu:focus-within')) return
-              if (document.activeElement?.closest?.('.selection-menu')) return
-              if (selectionRef.current) {
-                selectionRef.current = null
-                setSelection(null)
-                setBasketPage('')
-              }
-            }, 280)
+              if (anyContentsHasSelection()) return
+              // interacting 只宽限一次；避免点「更多/关闭」后锁死永不关
+              bubbleInteractingRef.current = false
+              dismissOpenBubble()
+            }, delay)
+          }
+          const syncOrPresentAfterTouch = () => {
+            if (!isCompactRef.current) {
+              scheduleSettledPresent()
+              return
+            }
+            // 松手后立刻用当前选区刷新底栏全文；若已取消选中则关闭
+            if (presentFromAnyContents()) return
+            if (selectionRef.current && !anyContentsHasSelection()) {
+              dismissOpenBubble()
+              return
+            }
+            scheduleSettledPresent()
           }
           const onPointerUpSelect = (e: PointerEvent) => {
-            // touch 走 touchend（给系统选区手柄一点 settle 时间）
-            if (e.pointerType === 'touch') return
+            if (e.pointerType === 'touch') {
+              selectingRef.current = false
+              lastPointerClientRef.current = { x: e.clientX, y: e.clientY }
+              syncOrPresentAfterTouch()
+              return
+            }
             // 鼠标必须同步弹出：延迟会被随后的 click 抢先清掉选区
             finishSelect(0, { x: e.clientX, y: e.clientY })
           }
           const onPointerCancelSelect = (e: PointerEvent) => {
+            selectingRef.current = false
+            lastPointerClientRef.current = { x: e.clientX, y: e.clientY }
+            if (isCompactRef.current) {
+              syncOrPresentAfterTouch()
+              return
+            }
             finishSelect(0, { x: e.clientX, y: e.clientY })
+          }
+
+          let iframeTouchX = 0
+          let iframeTouchY = 0
+          let iframeTouchAt = 0
+          let touchMaxAbsDx = 0
+          let touchMaxAbsDy = 0
+          let touchPeakDx = 0
+          let iframeTouchMulti = false
+          const onIframeTouchStart = (e: TouchEvent) => {
+            if (e.touches.length >= 2 || isReaderPinchBlocking()) {
+              iframeTouchMulti = true
+              markTouchGestureMulti()
+              return
+            }
+            iframeTouchMulti = false
+            const t = e.touches?.[0]
+            if (!t) return
+            iframeTouchX = t.clientX
+            iframeTouchY = t.clientY
+            iframeTouchAt = Date.now()
+            touchMaxAbsDx = 0
+            touchMaxAbsDy = 0
+            touchPeakDx = 0
+            pointerStartRef.current = { x: t.clientX, y: t.clientY }
+            pointerMovePxRef.current = 0
           }
           const onTouchEndSelect = (e: TouchEvent) => {
             const t = e.changedTouches?.[0]
-            finishSelect(isCompactRef.current ? 200 : 40, t ? { x: t.clientX, y: t.clientY } : null)
+            const ptr = t ? { x: t.clientX, y: t.clientY } : null
+            if (ptr) lastPointerClientRef.current = ptr
+            selectingRef.current = false
+
+            if (iframeTouchMulti || e.touches.length >= 1 || isReaderPinchBlocking()) {
+              if (e.touches.length === 0) iframeTouchMulti = false
+              return
+            }
+
+            const swipeOpts = isCompactRef.current
+              ? { threshold: SWIPE_THRESHOLD_COMPACT_PX, axisRatio: SWIPE_AXIS_RATIO_COMPACT }
+              : undefined
+
+            // 已有选区或正在调手柄：绝不当成翻页，避免 iOS 拖光标全选错乱
+            const hasLiveSel = Boolean(selectionText(contents.window) || selectionRef.current)
+            if (hasLiveSel) {
+              syncOrPresentAfterTouch()
+              return
+            }
+
+            // 明确横滑：优先翻页（过程中误触选区不挡）
+            if (t) {
+              const byEnd = resolveHorizontalSwipe(
+                { clientX: iframeTouchX, clientY: iframeTouchY },
+                { clientX: t.clientX, clientY: t.clientY },
+                swipeOpts,
+              )
+              const byTravel = resolveHorizontalSwipeByTravel(
+                touchPeakDx,
+                touchMaxAbsDx,
+                touchMaxAbsDy,
+                swipeOpts,
+              )
+              const dir = byEnd.direction || byTravel.direction
+              if (dir) {
+                clearSettleTimer()
+                clearDomSelection(contents.window)
+                lastSelectionActivityAtRef.current = 0
+                if (selectionRef.current) {
+                  selectionRef.current = null
+                  setSelection(null)
+                  setBasketPage('')
+                }
+                lastTouchNavAt = Date.now()
+                lastTouchNavAtRef.current = lastTouchNavAt
+                if (dir === 'next') turnNextRef.current()
+                else turnPrevRef.current()
+                return
+              }
+            }
+
+            // 已有选区 / 刚划过词：只出功能面板
+            scheduleSettledPresent()
           }
 
           const onLinkClickCapture = (event: MouseEvent) => {
@@ -867,30 +1515,42 @@ function EpubReaderPage({ bookId }: { bookId: string }) {
             if (stack[stack.length - 1] !== cfi) stack.push(cfi)
             setCanNavBack(true)
           }
-
-          let iframeTouchX = 0
-          let iframeTouchY = 0
-          let iframeTouchAt = 0
-          const onIframeTouchStart = (e: TouchEvent) => {
+          const onIframeTouchMove = (e: TouchEvent) => {
+            if (e.touches.length >= 2 || isReaderPinchBlocking()) {
+              iframeTouchMulti = true
+              markTouchGestureMulti()
+              return
+            }
+            if (iframeTouchMulti) return
             const t = e.touches?.[0]
             if (!t) return
-            iframeTouchX = t.clientX
-            iframeTouchY = t.clientY
-            iframeTouchAt = Date.now()
-            pointerStartRef.current = { x: t.clientX, y: t.clientY }
-            pointerMovePxRef.current = 0
-          }
-          const onIframeTouchMove = (e: TouchEvent) => {
-            const t = e.touches?.[0]
-            if (!t || !pointerStartRef.current) return
-            pointerMovePxRef.current = Math.max(
-              pointerMovePxRef.current,
-              pointerTravel(pointerStartRef.current, t.clientX, t.clientY),
-            )
+            const dx = t.clientX - iframeTouchX
+            const dy = t.clientY - iframeTouchY
+            touchMaxAbsDx = Math.max(touchMaxAbsDx, Math.abs(dx))
+            touchMaxAbsDy = Math.max(touchMaxAbsDy, Math.abs(dy))
+            if (Math.abs(dx) >= Math.abs(touchPeakDx)) touchPeakDx = dx
+            if (pointerStartRef.current) {
+              pointerMovePxRef.current = Math.max(
+                pointerMovePxRef.current,
+                pointerTravel(pointerStartRef.current, t.clientX, t.clientY),
+              )
+            }
+            // 已有选区 / 气泡已开：用户在拖手柄扩选，绝不清选区、不 preventDefault（iOS 否则易全选下方）
+            if (selectionText(contents.window) || selectionRef.current) return
+            // 横向意图明确：清误触选区，并阻止滚动抢走手势
+            if (
+              touchMaxAbsDx >= SWIPE_INTENT_PX &&
+              touchMaxAbsDx > touchMaxAbsDy * SWIPE_AXIS_RATIO_COMPACT
+            ) {
+              clearDomSelection(contents.window)
+              lastSelectionActivityAtRef.current = 0
+              if (e.cancelable) e.preventDefault()
+            }
           }
           const onIframeTouchEndNav = (e: TouchEvent) => {
-            // 左右翻页主要由外层热区承担；iframe 内仅中央点按切换工具栏
+            // 横滑翻页已在 onTouchEndSelect 处理；此处仅中央点按切换工具栏
             if (Date.now() - lastPresentAt < 500) return
+            if (Date.now() - lastTouchNavAt < 400) return
             if (selectionRef.current) return
             if (selectionText(contents.window)) return
             const t = e.changedTouches?.[0]
@@ -901,9 +1561,20 @@ function EpubReaderPage({ bookId }: { bookId: string }) {
             if (target?.closest?.('a, button, input, textarea, select')) return
             const w = contents.window.innerWidth || 1
             const xRatio = t.clientX / w
-            // 落在左右翻页带：交给外层热区（避免点按选字）
             if (xRatio < 0.18 || xRatio > 0.82) return
             if (isCompactRef.current) toggleChromeRef.current()
+          }
+
+          // 再注入一层 touch-action；iOS 用 manipulation，避免 pan-y 干扰选区手柄拖拽
+          try {
+            const style = contents.document.createElement('style')
+            style.setAttribute('data-moyin-touch', '1')
+            const touchAction = isAppleTouchDevice() ? 'manipulation' : 'pan-y pinch-zoom'
+            style.textContent =
+              `html,body{-webkit-user-select:text!important;user-select:text!important;-webkit-touch-callout:none!important;touch-action:${touchAction}!important;}`
+            contents.document.head?.appendChild(style)
+          } catch {
+            /* ignore */
           }
 
           contents.document.addEventListener('contextmenu', onContextMenu)
@@ -912,12 +1583,70 @@ function EpubReaderPage({ bookId }: { bookId: string }) {
           contents.document.addEventListener('pointermove', onPointerMoveTrack, { passive: true })
           contents.document.addEventListener('pointerup', onPointerUpSelect, { passive: true })
           contents.document.addEventListener('pointercancel', onPointerCancelSelect, { passive: true })
-          contents.document.addEventListener('touchend', onTouchEndSelect, { passive: true })
-          contents.document.addEventListener('click', onLinkClickCapture, true)
           contents.document.addEventListener('touchstart', onIframeTouchStart, { passive: true })
-          contents.document.addEventListener('touchmove', onIframeTouchMove, { passive: true })
+          contents.document.addEventListener('touchmove', onIframeTouchMove, { passive: false })
+          // touchend：先划词/横滑（onTouchEndSelect），再点按工具栏
+          contents.document.addEventListener('touchend', onTouchEndSelect, { passive: true })
           contents.document.addEventListener('touchend', onIframeTouchEndNav, { passive: true })
+          contents.document.addEventListener('click', onLinkClickCapture, true)
+          // 全部监听挂上后再标记，避免中途抛错导致永久跳过补绑
+          selectionBoundDocs.add(contents.document)
+        }
+        rendition.hooks.content.register(attachSelectionHandlers)
+        const rebindSelectionToContents = () => {
+          const seen = new Set<Document>()
+          try {
+            const raw = rendition.getContents?.() as unknown
+            const list = (Array.isArray(raw) ? raw : raw ? [raw] : []) as ContentsLike[]
+            for (const c of list) {
+              if (c?.document) seen.add(c.document)
+              attachSelectionHandlers(c)
+            }
+          } catch {
+            /* ignore */
+          }
+          // display 早于 hook / getContents 偶发为空：直接从 iframe 补一层 shim
+          try {
+            const iframes = viewerRef.current?.querySelectorAll('iframe') || []
+            iframes.forEach((iframe) => {
+              const doc = iframe.contentDocument
+              const win = iframe.contentWindow
+              if (!doc || !win || seen.has(doc)) return
+              const shim: ContentsLike = {
+                document: doc,
+                window: win,
+                cfiFromRange: (range: Range) => {
+                  try {
+                    const raw = rendition.getContents?.() as unknown
+                    const list = (Array.isArray(raw) ? raw : raw ? [raw] : []) as ContentsLike[]
+                    const hit = list.find((c) => c.document === doc)
+                    return hit?.cfiFromRange?.(range) || ''
+                  } catch {
+                    return ''
+                  }
+                },
+              }
+              attachSelectionHandlers(shim)
+            })
+          } catch {
+            /* ignore */
+          }
+        }
+        rebindSelectionToContents()
+        // contents / iframe 可能略晚于 display resolve
+        ;[200, 600, 1500, 3000].forEach((ms) => {
+          window.setTimeout(rebindSelectionToContents, ms)
         })
+        rendition.on('relocated', () => {
+          rebindSelectionToContents()
+          window.setTimeout(rebindSelectionToContents, 80)
+          window.setTimeout(rebindSelectionToContents, 400)
+        })
+        try {
+          ;(window as unknown as { __moyinRebind?: () => void }).__moyinRebind = rebindSelectionToContents
+        } catch {
+          /* ignore */
+        }
 
         const clearEpubSelections = () => {
           clearDomSelection()
@@ -938,12 +1667,27 @@ function EpubReaderPage({ bookId }: { bookId: string }) {
           pointerStartRef.current = null
           pointerMovePxRef.current = 0
         }
+        let lastTurnAt = 0
         const turnPrev = () => {
+          if (isReaderPinchBlocking()) return
+          const now = Date.now()
+          if (now - lastTurnAt < 280) return
+          lastTurnAt = now
+          midSelectPinnedRef.current = false
+          setMidSelectMode(false)
           clearEpubSelections()
+          suppressProgressSaveRef.current = false
           rendition.prev()
         }
         const turnNext = () => {
+          if (isReaderPinchBlocking()) return
+          const now = Date.now()
+          if (now - lastTurnAt < 280) return
+          lastTurnAt = now
+          midSelectPinnedRef.current = false
+          setMidSelectMode(false)
           clearEpubSelections()
+          suppressProgressSaveRef.current = false
           rendition.next()
         }
         turnPrevRef.current = turnPrev
@@ -960,23 +1704,32 @@ function EpubReaderPage({ bookId }: { bookId: string }) {
           }
         }
 
-        let lastTouchNavAt = 0
         const markTouchNav = () => {
           lastTouchNavAt = Date.now()
+          lastTouchNavAtRef.current = lastTouchNavAt
         }
 
         clickHandler = (event: MouseEvent, contents: { window: Window }) => {
           // 划词结束后的合成 click：绝不能关掉刚弹出的气泡 / 清掉选区
           if (Date.now() - lastPresentAt < 800) return
           if (Date.now() - lastTouchNavAt < 450) return
+          // 选区刚变化（含拖手柄扩选）：忽略合成 click，避免长选区被清掉
+          if (Date.now() - lastSelectionActivityAtRef.current < 1200) return
+          if (selectingRef.current) return
           const target = event.target as HTMLElement | null
           if (target && target.closest('a, button, input, textarea, select')) return
           const win = contents?.window
-          const accidental = selectionText(win)
-          if (accidental && !isIntentionalTextSelection(accidental, pointerMovePxRef.current)) {
-            clearDomSelection(win)
-          } else if (accidental) {
-            return
+          const current = selectionText(win)
+          if (current) {
+            const gestureMs = selectStartedAtRef.current
+              ? Date.now() - selectStartedAtRef.current
+              : undefined
+            if (isAccidentalTapSelection(current, pointerMovePxRef.current, gestureMs)) {
+              clearDomSelection(win)
+            } else {
+              // 有意选区：吞掉 click，保留选区
+              return
+            }
           }
           if (selectionRef.current) {
             selectionRef.current = null
@@ -1009,20 +1762,40 @@ function EpubReaderPage({ bookId }: { bookId: string }) {
         }
         document.addEventListener('keyup', keyupHandler)
 
-        // 滑屏翻页（点按主要靠透明热区，避免依赖 iframe 事件）
+        // 滑屏翻页（外层 viewer；正文区主要靠 iframe 内手势）
         let touchStartX = 0
         let touchStartY = 0
-        let touchHandled = false
-        const SWIPE_THRESHOLD = 40
+        let viewerTouchMulti = false
         touchStartHandler = (e: TouchEvent) => {
+          if (e.touches.length >= 2 || isReaderPinchBlocking()) {
+            viewerTouchMulti = true
+            markTouchGestureMulti()
+            return
+          }
+          viewerTouchMulti = false
           const t = e.touches?.[0] || e.changedTouches?.[0]
           if (!t) return
           touchStartX = t.clientX
           touchStartY = t.clientY
-          touchHandled = false
         }
         touchEndHandler = (e: TouchEvent) => {
-          if (touchHandled) return
+          if (viewerTouchMulti || e.touches.length >= 1 || isReaderPinchBlocking()) {
+            if (e.touches.length === 0) viewerTouchMulti = false
+            return
+          }
+          const t = e.changedTouches?.[0]
+          if (!t) return
+          // 选区面板打开或刚划过词：外层滑屏不翻页
+          if (selectionRef.current) return
+          if (Date.now() - lastSelectionActivityAtRef.current < 900) return
+          const swipe = resolveHorizontalSwipe(
+            { clientX: touchStartX, clientY: touchStartY },
+            { clientX: t.clientX, clientY: t.clientY },
+            isCompactRef.current
+              ? { threshold: SWIPE_THRESHOLD_COMPACT_PX, axisRatio: SWIPE_AXIS_RATIO_COMPACT }
+              : undefined,
+          )
+          if (!swipe.handled || !swipe.direction) return
           try {
             const rawContents = rendition.getContents?.() as unknown
             const list: ContentsLike[] = Array.isArray(rawContents)
@@ -1030,37 +1803,13 @@ function EpubReaderPage({ bookId }: { bookId: string }) {
               : rawContents
                 ? [rawContents as ContentsLike]
                 : []
-            for (const c of list) {
-              if (c.window?.getSelection?.()?.toString().trim()) {
-                presentSelectionFromContents(c)
-                touchHandled = true
-                return
-              }
-            }
+            for (const c of list) clearDomSelection(c.window)
           } catch {
             /* ignore */
           }
-          if (selectionRef.current) return
-          const t = e.changedTouches?.[0]
-          if (!t) return
-          const dx = t.clientX - touchStartX
-          const dy = t.clientY - touchStartY
-          const absDx = Math.abs(dx)
-          const absDy = Math.abs(dy)
-
-          if (absDy > SWIPE_THRESHOLD && absDy > absDx * 1.15) {
-            touchHandled = true
-            markTouchNav()
-            if (dy < 0) turnNext()
-            else turnPrev()
-            return
-          }
-          if (absDx > SWIPE_THRESHOLD && absDx > absDy * 1.15) {
-            touchHandled = true
-            markTouchNav()
-            if (dx < 0) turnNext()
-            else turnPrev()
-          }
+          markTouchNav()
+          if (swipe.direction === 'next') turnNext()
+          else turnPrev()
         }
         viewerRef.current?.addEventListener('touchstart', touchStartHandler, { passive: true })
         viewerRef.current?.addEventListener('touchend', touchEndHandler, { passive: true })
@@ -1243,6 +1992,8 @@ function EpubReaderPage({ bookId }: { bookId: string }) {
     const key = `${bookId}@@${cfi}@@${q}`
     if (lastFlashKeyRef.current === key) return
     lastFlashKeyRef.current = key
+    // 会话中再次被引用/搜索定位：暂不改进度
+    suppressProgressSaveRef.current = true
     let cancelled = false
     ;(async () => {
       try {
@@ -1403,6 +2154,8 @@ function EpubReaderPage({ bookId }: { bookId: string }) {
     setShowThemePicker(false)
     setChromeVisible(true)
     chromeToggleLockUntilRef.current = Date.now() + 800
+    // 目录 / 高亮列表等主动跳转：算阅读行为，写入进度
+    suppressProgressSaveRef.current = false
 
     const rendition = renditionRef.current
     const epubBook = bookRef.current
@@ -1574,6 +2327,7 @@ function EpubReaderPage({ bookId }: { bookId: string }) {
     if (!rendition) return
     const keyword = searchHighlightQuery.trim() || searchQuery.trim()
     setDrawerTab(null)
+    suppressProgressSaveRef.current = false
     const pushed = pushNavBackPoint()
     try {
       await rendition.display(hit.cfi_anchor || undefined)
@@ -1600,6 +2354,7 @@ function EpubReaderPage({ bookId }: { bookId: string }) {
     }
     const page = Math.min(totalPages, Math.max(1, n))
     setPageInput(String(page))
+    suppressProgressSaveRef.current = false
     try {
       if (pageSourceRef.current === 'print') {
         const cfi = epubBook.pageList.cfiFromPage(page) as unknown
@@ -1664,16 +2419,18 @@ function EpubReaderPage({ bookId }: { bookId: string }) {
     const colors = resolveReaderTheme(themeId, effectiveBg)
     const rendition = renditionRef.current
     if (rendition) {
+      const bodyFont = readerFontFamilyCss(readerFontRef.current)
       rendition.themes.default({
         '::selection': { background: 'rgba(216,169,78,0.35)' },
         body: {
-          'font-family': "'Noto Serif SC', serif !important",
+          'font-family': `${bodyFont} !important`,
           background: `${colors.bg} !important`,
           color: `${colors.fg} !important`,
           '-webkit-user-select': 'text !important',
           'user-select': 'text !important',
         },
         'p, div, span, li, td, th, h1, h2, h3, h4, h5, h6, a': {
+          'font-family': `${bodyFont} !important`,
           '-webkit-user-select': 'text !important',
           'user-select': 'text !important',
           color: `${colors.fg} !important`,
@@ -1684,6 +2441,51 @@ function EpubReaderPage({ bookId }: { bookId: string }) {
     }
     if (viewerRef.current) viewerRef.current.style.background = colors.bg
   }
+
+  // 界面设置里的「阅读字体」变更时，立即同步到 EPUB 正文
+  useEffect(() => {
+    const rendition = renditionRef.current
+    if (!rendition) return
+
+    const applyFontTheme = () => {
+      const bodyFont = readerFontFamilyCss(readerFont)
+      const colors = resolveReaderTheme(readerThemeId, customBg)
+      try {
+        // 当前已打开的章节 iframe 补注入字体
+        const raw = rendition.getContents?.() as
+          | { document?: Document }
+          | Array<{ document?: Document }>
+          | undefined
+        const list = !raw ? [] : Array.isArray(raw) ? raw : [raw]
+        for (const c of list) {
+          if (c?.document) injectEpubReaderFonts(c.document)
+        }
+        rendition.themes.default({
+          '::selection': { background: 'rgba(216,169,78,0.35)' },
+          body: {
+            'font-family': `${bodyFont} !important`,
+            background: `${colors.bg} !important`,
+            color: `${colors.fg} !important`,
+            '-webkit-user-select': 'text !important',
+            'user-select': 'text !important',
+          },
+          'p, div, span, li, td, th, h1, h2, h3, h4, h5, h6, a': {
+            'font-family': `${bodyFont} !important`,
+            '-webkit-user-select': 'text !important',
+            'user-select': 'text !important',
+            color: `${colors.fg} !important`,
+          },
+        })
+        rendition.themes.fontSize(`${fontSizeRef.current}%`)
+      } catch {
+        /* rendition 可能已销毁 */
+      }
+    }
+
+    applyFontTheme()
+    // 字体 data-URI 就绪后再刷一次，避免先回退到系统黑体
+    void loadEpubReaderFontFaceCss().then(applyFontTheme)
+  }, [readerFont, readerThemeId, customBg])
 
   async function saveNote(content: string) {
     setNoteContent(content)
@@ -1699,8 +2501,8 @@ function EpubReaderPage({ bookId }: { bookId: string }) {
     }, 700)
   }
 
-  function changeFontSize(delta: number) {
-    const next = Math.min(180, Math.max(70, fontSizeRef.current + delta))
+  function persistFontSize(nextRaw: number) {
+    const next = Math.min(180, Math.max(70, Math.round(nextRaw)))
     setFontSize(next)
     fontSizeRef.current = next
     try {
@@ -1714,6 +2516,11 @@ function EpubReaderPage({ bookId }: { bookId: string }) {
     } catch {
       /* ignore */
     }
+    return next
+  }
+
+  function changeFontSize(delta: number) {
+    persistFontSize(fontSizeRef.current + delta)
   }
 
   // 点空白关闭背景面板
@@ -1753,12 +2560,17 @@ function EpubReaderPage({ bookId }: { bookId: string }) {
     setSelection(null)
     setBasketPage('')
     selectingRef.current = false
+    bubbleInteractingRef.current = false
     lastPointerClientRef.current = null
     pointerStartRef.current = null
     pointerMovePxRef.current = 0
+    lastSelectionActivityAtRef.current = 0
+    selectStartedAtRef.current = 0
   }
 
   function handleTapZone(action: 'prev' | 'next') {
+    midSelectPinnedRef.current = false
+    setMidSelectMode(false)
     clearAllEpubSelections()
     setActiveHighlight(null)
     if (action === 'prev') turnPrevRef.current()
@@ -1805,6 +2617,7 @@ function EpubReaderPage({ bookId }: { bookId: string }) {
     const epubBook = bookRef.current
     const rendition = renditionRef.current
     if (!epubBook || !rendition || totalPages <= 0) return
+    suppressProgressSaveRef.current = false
     if (scrubOriginPendingRef.current) {
       pushNavBackPoint()
       scrubOriginPendingRef.current = false
@@ -1854,13 +2667,25 @@ function EpubReaderPage({ bookId }: { bookId: string }) {
         cfi_range: cfi,
       })
       if (!pageNo) {
-        toast.success('已加入引用篮（未填页码，导出前请补纸书页）')
+        toast.success('已加入引用篮', {
+          id: 'citation-added',
+          description: '未填页码，导出前请补纸书页',
+          duration: 3400,
+        })
       } else if (pageSourceRef.current === 'estimate') {
-        toast.success('已加入引用篮（页码为估算，请按纸书核对）')
+        toast.success('已加入引用篮', {
+          id: 'citation-added',
+          description: '页码为估算，请按纸书核对',
+          duration: 3400,
+        })
       } else if (pageSourceRef.current === 'virtual') {
-        toast.success('已加入引用篮（当前为虚拟页，请改成纸书页码）')
+        toast.success('已加入引用篮', {
+          id: 'citation-added',
+          description: '当前为虚拟页，请改成纸书页码',
+          duration: 3400,
+        })
       } else {
-        toast.success('已加入引用篮')
+        toast.success('已加入引用篮', { id: 'citation-added' })
       }
       dismissSelection()
     } catch (err) {
@@ -1911,11 +2736,83 @@ function EpubReaderPage({ bookId }: { bookId: string }) {
     }
   }
 
-  function dismissSelection() {
-    selectionRef.current = null
-    setSelection(null)
-    setBasketPage('')
+  function dismissSelection(opts?: { keepAnnotate?: boolean }) {
+    clearAllEpubSelections()
+    bubbleInteractingRef.current = false
+    // 主动关闭功能条时退出临时划词并恢复翻页；保留钉住的顶栏划词态
+    if (opts?.keepAnnotate) {
+      if (!midSelectPinnedRef.current) setMidSelectMode(false)
+      return
+    }
+    midSelectPinnedRef.current = false
+    setMidSelectMode(false)
   }
+
+  function clearEpubPinchTransform() {
+    const el = viewerRef.current
+    if (!el) return
+    el.style.transform = ''
+    el.style.willChange = ''
+  }
+
+  /** 双指过程中跟手改真实字号（不写偏好）；步进之间用微量 CSS scale 补间保持丝滑 */
+  function applyEpubPinchPreview(factor: number, originValue: number) {
+    const raw = Math.min(180, Math.max(70, originValue * factor))
+    const stepped = Math.round(raw / 2) * 2
+    const hud = Math.round(raw)
+    setPinchHud(hud)
+
+    if (stepped !== pinchAppliedRef.current) {
+      pinchAppliedRef.current = stepped
+      fontSizeRef.current = stepped
+      setFontSize(stepped)
+      try {
+        renditionRef.current?.themes.fontSize(`${stepped}%`)
+      } catch {
+        /* ignore */
+      }
+    }
+
+    const el = viewerRef.current
+    if (!el || pinchAppliedRef.current <= 0) return
+    // 相对已应用字号的残余缩放，只补步进之间的缝隙（通常 <2%）
+    const residual = raw / pinchAppliedRef.current
+    el.style.willChange = 'transform'
+    el.style.transformOrigin = 'top center'
+    if (Math.abs(residual - 1) > 0.006) {
+      el.style.transform = `scale(${residual})`
+    } else {
+      el.style.transform = ''
+    }
+  }
+
+  usePinchZoom(viewerWrapRef, {
+    enabled: isCompact && !loading,
+    previewOnly: true,
+    getValue: () => fontSizeRef.current,
+    setValue: (next) => {
+      clearEpubPinchTransform()
+      persistFontSize(next)
+      setPinchHud(null)
+    },
+    onPreview: (factor, originValue) => {
+      applyEpubPinchPreview(factor, originValue)
+    },
+    min: 70,
+    max: 180,
+    step: 2,
+    onPinchStart: () => {
+      pinchAppliedRef.current = fontSizeRef.current
+      setPinchHud(fontSizeRef.current)
+      midSelectPinnedRef.current = false
+      setMidSelectMode(false)
+      clearAllEpubSelections()
+    },
+    onPinchEnd: () => {
+      clearEpubPinchTransform()
+      setPinchHud(null)
+    },
+  })
 
   async function deleteHighlight(h: Highlight) {
     try {
@@ -2021,7 +2918,7 @@ function EpubReaderPage({ bookId }: { bookId: string }) {
         onClick={(e) => e.stopPropagation()}
       >
         <div className="reader-topbar-left">
-          <button className="icon-btn" onClick={() => navigate(-1)} title="返回" aria-label="返回">
+          <button className="icon-btn" onClick={() => exitReader(navigate)} title="返回" aria-label="返回">
             <ArrowLeft size={18} />
           </button>
           <ReaderBookIdentity
@@ -2049,39 +2946,41 @@ function EpubReaderPage({ bookId }: { bookId: string }) {
           >
             <Search size={18} />
           </button>
-          <div className="reader-font-quick" title="字号">
-            <button
-              type="button"
-              className="icon-btn reader-font-quick-btn"
-              onPointerDown={(e) => e.stopPropagation()}
-              onClick={(e) => {
-                e.stopPropagation()
-                changeFontSize(-10)
-              }}
-              aria-label="缩小字号"
-              title="缩小字号"
-            >
-              <span className="reader-aa-icon reader-aa-sm" aria-hidden>
-                A
-              </span>
-            </button>
-            <span className="reader-font-quick-value">{fontSize}%</span>
-            <button
-              type="button"
-              className="icon-btn reader-font-quick-btn"
-              onPointerDown={(e) => e.stopPropagation()}
-              onClick={(e) => {
-                e.stopPropagation()
-                changeFontSize(10)
-              }}
-              aria-label="放大字号"
-              title="放大字号"
-            >
-              <span className="reader-aa-icon reader-aa-lg" aria-hidden>
-                A
-              </span>
-            </button>
-          </div>
+          {!isCompact && (
+            <div className="reader-font-quick" title="字号">
+              <button
+                type="button"
+                className="icon-btn reader-font-quick-btn"
+                onPointerDown={(e) => e.stopPropagation()}
+                onClick={(e) => {
+                  e.stopPropagation()
+                  changeFontSize(-10)
+                }}
+                aria-label="缩小字号"
+                title="缩小字号"
+              >
+                <span className="reader-aa-icon reader-aa-sm" aria-hidden>
+                  A
+                </span>
+              </button>
+              <span className="reader-font-quick-value">{fontSize}%</span>
+              <button
+                type="button"
+                className="icon-btn reader-font-quick-btn"
+                onPointerDown={(e) => e.stopPropagation()}
+                onClick={(e) => {
+                  e.stopPropagation()
+                  changeFontSize(10)
+                }}
+                aria-label="放大字号"
+                title="放大字号"
+              >
+                <span className="reader-aa-icon reader-aa-lg" aria-hidden>
+                  A
+                </span>
+              </button>
+            </div>
+          )}
           <button
             className={`icon-btn ${showThemePicker ? 'active' : ''}`}
             onPointerDown={(e) => e.stopPropagation()}
@@ -2090,9 +2989,10 @@ function EpubReaderPage({ bookId }: { bookId: string }) {
               setShowThemePicker((v) => !v)
               setDrawerTab(null)
             }}
-            title="显示设置（字号 / 背景）"
+            title="显示设置（字体 / 字号 / 背景）"
+            aria-label="显示设置"
           >
-            <Palette size={18} />
+            <Type size={18} />
           </button>
           <button
             className={`icon-btn ${drawerTab === 'toc' ? 'active' : ''}`}
@@ -2104,6 +3004,23 @@ function EpubReaderPage({ bookId }: { bookId: string }) {
           >
             <List size={18} />
           </button>
+          {isCompact && (
+            <button
+              type="button"
+              className={`icon-btn${midSelectMode ? ' active' : ''}`}
+              onPointerDown={(e) => e.stopPropagation()}
+              onClick={(e) => {
+                e.stopPropagation()
+                setShowThemePicker(false)
+                toggleAnnotateMode()
+              }}
+              title={midSelectMode ? '退出划词' : '划词标注'}
+              aria-label={midSelectMode ? '退出划词' : '划词标注'}
+              aria-pressed={midSelectMode}
+            >
+              <TextSelect size={18} />
+            </button>
+          )}
           <button
             className={`icon-btn ${drawerTab === 'notes' ? 'active' : ''}`}
             onClick={() => {
@@ -2114,6 +3031,18 @@ function EpubReaderPage({ bookId }: { bookId: string }) {
           >
             <Highlighter size={18} />
           </button>
+          {!isCompact && (
+            <button
+              className={`icon-btn ${drawerTab === 'translate' ? 'active' : ''}`}
+              onClick={() => {
+                setShowThemePicker(false)
+                setDrawerTab((v) => (v === 'translate' ? null : 'translate'))
+              }}
+              title="划词翻译"
+            >
+              <Languages size={18} />
+            </button>
+          )}
           <button
             className={`icon-btn ${drawerTab === 'journal' ? 'active' : ''}`}
             onClick={() => {
@@ -2131,6 +3060,17 @@ function EpubReaderPage({ bookId }: { bookId: string }) {
                 const next = layoutMode === 'a4' ? 'full' : 'a4'
                 setLayoutMode(next)
                 localStorage.setItem('moyin_reader_layout', next)
+                // 立即排一次：等 React 提交 class 后再用 effect 补齐
+                window.requestAnimationFrame(() => {
+                  const r = renditionRef.current
+                  const el = viewerRef.current
+                  if (!r || !el) return
+                  try {
+                    r.resize(el.clientWidth, el.clientHeight)
+                  } catch {
+                    /* ignore */
+                  }
+                })
               }}
               title={layoutMode === 'a4' ? '切换为全宽显示' : '切换为 A4 居中显示'}
             >
@@ -2147,6 +3087,26 @@ function EpubReaderPage({ bookId }: { bookId: string }) {
           onPointerDown={(e) => e.stopPropagation()}
           onClick={(e) => e.stopPropagation()}
         >
+          <div className="theme-popover-title">阅读字体</div>
+          <div className="theme-font-family-row" role="group" aria-label="阅读字体">
+            {READER_FONT_OPTIONS.map((f) => {
+              const selected = readerFont === f.id
+              return (
+                <button
+                  key={f.id}
+                  type="button"
+                  className={`theme-font-family-btn${selected ? ' active' : ''}`}
+                  style={{ fontFamily: f.fontFamily }}
+                  title={f.label}
+                  aria-pressed={selected}
+                  onClick={() => setReaderFont(f.id)}
+                >
+                  <span className="theme-font-family-sample">字</span>
+                  <span className="theme-font-family-label">{f.shortLabel}</span>
+                </button>
+              )
+            })}
+          </div>
           <div className="theme-popover-title">字号</div>
           <div className="theme-font-row">
             <button type="button" className="icon-btn" onClick={() => changeFontSize(-10)} aria-label="缩小字号">
@@ -2174,6 +3134,16 @@ function EpubReaderPage({ bookId }: { bookId: string }) {
               <input type="color" value={customBg} onChange={(e) => applyReaderTheme('custom', e.target.value)} />
             </label>
           </div>
+          <div className="theme-popover-title">划词翻译</div>
+          <div className="theme-switch-row">
+            <span>松手后自动翻译</span>
+            <LabSwitch
+              checked={autoTranslate}
+              onChange={(v) => {
+                void updatePreferences({ reader_auto_translate: v })
+              }}
+            />
+          </div>
         </div>
       )}
 
@@ -2191,11 +3161,28 @@ function EpubReaderPage({ bookId }: { bookId: string }) {
           )}
           <div ref={viewerRef} className="epub-viewer" />
 
-          {!loading && (
+          {pinchHud != null && (
+            <div className="reader-pinch-hud" aria-live="polite" aria-atomic="true">
+              <span className="reader-pinch-hud-value">{pinchHud}</span>
+              <span className="reader-pinch-hud-unit">%</span>
+              <span className="reader-pinch-hud-label">字号</span>
+            </div>
+          )}
+
+          {isCompact && !midSelectMode && !selection && !loading && (
+            <ReaderMidSwipeLayer
+              onPrev={() => turnPrevRef.current()}
+              onNext={() => turnNextRef.current()}
+              onTap={() => toggleChromeRef.current()}
+              onLongPressSelect={() => enterAnnotateMode({ pinned: false })}
+            />
+          )}
+
+          {/* 有选区时热区让位；无选区即使曾进划词也保留左右翻页 */}
+          {!loading && !(isCompact && selection) && (
             <>
-              {/* 左右热区盖在 iframe 之上：点按翻页且不触发选字 */}
               <div
-                className="reader-tap-zone left"
+                className={`reader-tap-zone left${isCompact ? ' reader-tap-zone-compact' : ''}`}
                 aria-hidden
                 onPointerDown={suppressTapZonePointer}
                 onMouseDown={suppressTapZonePointer}
@@ -2205,7 +3192,7 @@ function EpubReaderPage({ bookId }: { bookId: string }) {
                 }}
               />
               <div
-                className="reader-tap-zone right"
+                className={`reader-tap-zone right${isCompact ? ' reader-tap-zone-compact' : ''}`}
                 aria-hidden
                 onPointerDown={suppressTapZonePointer}
                 onMouseDown={suppressTapZonePointer}
@@ -2217,8 +3204,9 @@ function EpubReaderPage({ bookId }: { bookId: string }) {
             </>
           )}
 
-          {selection && (
+          {selection && (!isCompact || selectionChromeEl) && (
             <SelectionBubble
+              variant={isCompact ? 'sheet' : 'bar'}
               anchor={selection.anchor}
               text={selection.text}
               pageValue={basketPage}
@@ -2247,6 +3235,20 @@ function EpubReaderPage({ bookId }: { bookId: string }) {
               containerWidth={viewerWrapRef.current?.clientWidth || 360}
               containerHeight={viewerWrapRef.current?.clientHeight || 640}
               interactingRef={bubbleInteractingRef}
+              translate={translateBubble}
+              onTranslate={translateNow}
+              translatePanelOpen={drawerTab === 'translate'}
+              onToggleTranslatePanel={() => {
+                if (drawerTab === 'translate') {
+                  setDrawerTab(null)
+                  return
+                }
+                openPanelFromBubble()
+                setShowThemePicker(false)
+                setDrawerTab('translate')
+                setChromeVisible(true)
+              }}
+              portalRoot={isCompact ? selectionChromeEl : shellRef.current}
             />
           )}
 
@@ -2300,6 +3302,7 @@ function EpubReaderPage({ bookId }: { bookId: string }) {
                 {drawerTab === 'toc' && '目录'}
                 {drawerTab === 'notes' && '本书笔记目录'}
                 {drawerTab === 'search' && '书内搜索'}
+                {drawerTab === 'translate' && '划词翻译'}
               </div>
               <button
                 className="icon-btn"
@@ -2410,11 +3413,18 @@ function EpubReaderPage({ bookId }: { bookId: string }) {
               </div>
             )}
 
+            {drawerTab === 'translate' && (
+              <ReaderTranslatePanel entry={translatePanel} onExplain={askExplain} />
+            )}
+
           </div>
         )}
       </div>
 
-      <div className="reader-bottombar" onMouseDown={(e) => e.stopPropagation()}>
+      <div
+        className={`reader-bottombar${isCompact && selection ? ' is-selecting' : ''}`}
+        onMouseDown={(e) => e.stopPropagation()}
+      >
         <input
           className="reader-scrubber"
           type="range"
@@ -2453,6 +3463,7 @@ function EpubReaderPage({ bookId }: { bookId: string }) {
             <ChevronRight size={18} />
           </button>
         </div>
+        <div ref={setSelectionChromeEl} className="reader-bottombar-selection" />
       </div>
     </div>
   )

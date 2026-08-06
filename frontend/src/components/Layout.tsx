@@ -1,12 +1,14 @@
-import { useState, type ReactNode } from 'react'
-import { useNavigate, useLocation, Link } from 'react-router-dom'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
+import { useNavigate, useLocation, Link, type Location } from 'react-router-dom'
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion'
-import { Feather, Home, LayoutGrid, LogOut, Menu, Moon, Lightbulb, ShieldCheck, Sun, X } from 'lucide-react'
+import { Feather, Home, LayoutGrid, LogOut, Menu, Lightbulb, Settings2, ShieldCheck, X } from 'lucide-react'
 import { useAuth } from '../contexts/AuthContext'
 import { useTheme } from '../contexts/ThemeContext'
+import { useUISettings } from '../contexts/UISettingsContext'
 import { easeOutExpo, inkRevealVariants, softSpring } from '../lib/motion'
 import { useMediaQuery } from '../lib/useMediaQuery'
 import { APP_VERSION_LABEL } from '../version'
+import ModeToggle from './ModeToggle'
 
 function NavItem({ to, icon, label }: { to: string; icon: ReactNode; label: string }) {
   const location = useLocation()
@@ -39,17 +41,105 @@ function NavItem({ to, icon, label }: { to: string; icon: ReactNode; label: stri
   )
 }
 
-export default function Layout({ children }: { children: ReactNode }) {
+export default function Layout({
+  children,
+  displayLocation,
+}: {
+  children: ReactNode
+  /** 阅读页覆盖时冻结的主界面 location，避免 key 变化导致子树重挂载丢滚动 */
+  displayLocation?: Location
+}) {
   const { user, logout } = useAuth()
   const { theme, toggleTheme } = useTheme()
+  const { advancedAnim } = useUISettings()
   const navigate = useNavigate()
-  const location = useLocation()
+  const realLocation = useLocation()
+  const location = displayLocation ?? realLocation
   const reduceMotion = useReducedMotion()
   const isCompact = useMediaQuery('(max-width: 900px)')
   const [mobileOpen, setMobileOpen] = useState(false)
+  const mobileOpenRef = useRef(false)
+  const skipRouteMotion = isCompact || reduceMotion || !advancedAnim
+  const shellRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    mobileOpenRef.current = mobileOpen
+  }, [mobileOpen])
+
+  // 路由切换时收起侧栏，避免从子页返回主页时菜单仍开着
+  useEffect(() => {
+    setMobileOpen(false)
+  }, [realLocation.pathname])
+
+  // 移动端：仅屏幕左缘右滑打开侧栏；左滑或点遮罩关闭
+  // （勿用「左半屏右滑」——会和系统/浏览器返回手势冲突，造成回主页就弹菜单）
+  useEffect(() => {
+    if (!isCompact) return
+    const el = shellRef.current
+    if (!el) return
+
+    let startX = 0
+    let startY = 0
+    let tracking = false
+    const EDGE_PX = 28
+    const THRESHOLD = 52
+
+    const onStart = (e: TouchEvent) => {
+      const t = e.touches[0]
+      if (!t) return
+      const target = e.target as HTMLElement | null
+      if (target?.closest?.('input, textarea, select, [contenteditable="true"]')) return
+      if (target?.closest?.('.reader-shell')) return
+      // 侧栏自身内部不处理开闭手势（避免误触）
+      if (target?.closest?.('.sidebar')) return
+      // 横向货架/筛选条滑动时，勿抢成「开侧栏」
+      if (target?.closest?.('[data-h-scroll], .continue-shelf, .library-filter-row, .h-shelf')) {
+        tracking = mobileOpenRef.current
+        startX = t.clientX
+        startY = t.clientY
+        return
+      }
+      startX = t.clientX
+      startY = t.clientY
+      // 只有从左缘起滑才跟踪「打开」；其它区域仅在已打开时跟踪关闭
+      tracking = t.clientX <= EDGE_PX || mobileOpenRef.current
+    }
+
+    const onEnd = (e: TouchEvent) => {
+      if (!tracking) return
+      tracking = false
+      const t = e.changedTouches[0]
+      if (!t) return
+      const dx = t.clientX - startX
+      const dy = t.clientY - startY
+      // 略提高阈值，减少安卓惯性滑动误开侧栏
+      if (Math.abs(dx) < THRESHOLD + 8 || Math.abs(dx) <= Math.abs(dy) * 1.35) return
+
+      if (dx > 0) {
+        if (mobileOpenRef.current) return
+        if (startX <= EDGE_PX) setMobileOpen(true)
+        return
+      }
+
+      if (mobileOpenRef.current) setMobileOpen(false)
+    }
+
+    const onCancel = () => {
+      tracking = false
+    }
+
+    el.addEventListener('touchstart', onStart, { passive: true })
+    el.addEventListener('touchend', onEnd, { passive: true })
+    el.addEventListener('touchcancel', onCancel, { passive: true })
+    return () => {
+      el.removeEventListener('touchstart', onStart)
+      el.removeEventListener('touchend', onEnd)
+      el.removeEventListener('touchcancel', onCancel)
+    }
+  }, [isCompact])
 
   return (
-    <div className="app-shell">
+    <div className="app-shell" ref={shellRef}>
       {/* SVG Filter for Gooey Nav Indicator */}
       <svg width="0" height="0" className="absolute pointer-events-none">
         <defs>
@@ -78,9 +168,6 @@ export default function Layout({ children }: { children: ReactNode }) {
             墨引 MoYin
           </div>
         </div>
-        <button className="icon-btn" style={{ marginLeft: 'auto' }} onClick={toggleTheme} title="切换深色/浅色">
-          {theme === 'dark' ? <Sun size={18} /> : <Moon size={18} />}
-        </button>
       </div>
 
       {mobileOpen && <div className="sidebar-backdrop" onClick={() => setMobileOpen(false)} />}
@@ -106,9 +193,9 @@ export default function Layout({ children }: { children: ReactNode }) {
           <NavItem to="/library" icon={<LayoutGrid size={17} />} label="书库" />
           <NavItem to="/citation" icon={<Feather size={17} />} label="引用篮" />
           <NavItem to="/ai-reader" icon={<Lightbulb size={17} />} label="AI 伴读" />
+          <NavItem to="/ui-settings" icon={<Settings2 size={17} />} label="界面设置" />
           {user?.role === 'admin' && <NavItem to="/admin" icon={<ShieldCheck size={17} />} label="管理后台" />}
         </nav>
-
 
         <div className="sidebar-footer">
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 10px' }}>
@@ -118,9 +205,7 @@ export default function Layout({ children }: { children: ReactNode }) {
               </div>
               <div style={{ fontSize: 11, color: 'var(--ink-faint)' }}>{user?.role === 'admin' ? '管理员' : '读者'}</div>
             </div>
-            <button className="icon-btn" title="切换深色/浅色" onClick={toggleTheme}>
-              {theme === 'dark' ? <Sun size={16} /> : <Moon size={16} />}
-            </button>
+            <ModeToggle className="mode-toggle-compact" isDark={theme === 'dark'} onToggle={toggleTheme} />
             <button
               className="icon-btn"
               title="退出登录"
@@ -138,7 +223,7 @@ export default function Layout({ children }: { children: ReactNode }) {
       <div className="main-area">
         {/* 小屏关闭路由过渡动画：Framer 的 opacity/clipPath 进场在 iOS 上偶发停在
            透明态，表现为 AI 伴读等页面整页空白；桌面仍保留 ink-reveal。 */}
-        {isCompact || reduceMotion ? (
+        {skipRouteMotion ? (
           <div key={location.pathname} className="main-area-enter">
             {children}
           </div>

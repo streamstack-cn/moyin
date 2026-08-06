@@ -10,20 +10,37 @@ import {
   ChevronLeft,
   ChevronRight,
   Highlighter,
+  Languages,
   Maximize,
   Minimize,
   Minus,
   NotebookPen,
   Plus,
+  Settings2,
+  TextSelect,
   X,
 } from 'lucide-react'
 import { api, ApiError, getToken } from '../api/client'
 import type { BookDetail, BookNote, CitationProject, Highlight } from '../api/types'
+import LabSwitch from '../components/LabSwitch'
 import ReaderBookIdentity from '../components/ReaderBookIdentity'
 import ReaderJournalPanel from '../components/ReaderJournalPanel'
 import ReaderReturnOriginBar from '../components/ReaderReturnOriginBar'
+import ReaderTranslatePanel from '../components/ReaderTranslatePanel'
+import ReaderMidSwipeLayer from '../components/ReaderMidSwipeLayer'
 import SelectionBubble from '../components/SelectionBubble'
 import { useAuth } from '../contexts/AuthContext'
+import { usePinchZoom } from '../hooks/usePinchZoom'
+import { useReaderSelectionTranslate } from '../hooks/useReaderSelectionTranslate'
+import {
+  clampPdfScale,
+  clearBookPdfScale,
+  computePdfFitScale,
+  loadBookPdfScale,
+  saveBookPdfScale,
+} from '../lib/pdfScale'
+import { isAppleTouchDevice } from '../lib/platform'
+import { isReaderPinchBlocking, markTouchGestureMulti } from '../lib/readerGestureGate'
 import { copyTextToClipboard } from '../lib/clipboard'
 import { BASKET_PROJECT_KEY, type SelectionAnchor } from '../lib/readerConstants'
 import { useJournalDrawerWidth } from '../lib/useJournalDrawerWidth'
@@ -39,17 +56,46 @@ import {
 import { findKeywordRanges } from '../lib/findKeywordRanges'
 import { highlightTerms } from '../lib/highlightQuery'
 import {
+  resolveHorizontalSwipe,
+  resolveHorizontalSwipeByTravel,
+  SWIPE_AXIS_RATIO_COMPACT,
+  SWIPE_INTENT_PX,
+  SWIPE_THRESHOLD_COMPACT_PX,
+} from '../lib/readerPageTurnGestures'
+import {
   clearDomSelection,
-  isIntentionalTextSelection,
+  isAccidentalTapSelection,
   pointerTravel,
   selectionText,
 } from '../lib/readerGestures'
-import { pointerToViewport, withPointer } from '../lib/selectionBubblePlacement'
+import { pointerToViewport, rangeToScreenBounds, withPointer } from '../lib/selectionBubblePlacement'
+import { exitReader } from '../lib/exitReader'
+import { isReaderPeekMode } from '../lib/readerDeepLink'
 import { useReaderChromeInset } from '../lib/useReaderChromeInset'
+import { useReaderExitBackGesture } from '../hooks/useReaderExitBackGesture'
 
 import pdfWorker from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
 
 GlobalWorkerOptions.workerSrc = pdfWorker
+
+/** nginx 若把 .mjs 当成 octet-stream，模块 Worker 会静默失败；用 JS MIME 的 Blob URL 兜底 */
+let pdfWorkerReady: Promise<void> | null = null
+function ensurePdfWorker(): Promise<void> {
+  if (!pdfWorkerReady) {
+    pdfWorkerReady = (async () => {
+      try {
+        const res = await fetch(pdfWorker)
+        if (!res.ok) return
+        const buf = await res.arrayBuffer()
+        const url = URL.createObjectURL(new Blob([buf], { type: 'text/javascript' }))
+        GlobalWorkerOptions.workerSrc = url
+      } catch {
+        GlobalWorkerOptions.workerSrc = pdfWorker
+      }
+    })()
+  }
+  return pdfWorkerReady
+}
 
 /** 扫描版/纯图页通常没有有效文字层；过短的空白/页码噪声不算可选文字 */
 function pageHasSelectableText(items: unknown[] | undefined): boolean {
@@ -120,19 +166,27 @@ export default function PdfReaderPage({ book }: Props) {
   const textLayerInstRef = useRef<TextLayer | null>(null)
   const textDivsRef = useRef<HTMLElement[]>([])
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  /** true=抑制进度写入（引用/搜索等 peek 深链）；翻页或指定页码后改为 false */
+  const suppressProgressSaveRef = useRef(false)
   const noteSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const renderTokenRef = useRef(0)
   const selectionRef = useRef<PdfSelectionState | null>(null)
   const bubbleInteractingRef = useRef(false)
   const selectingRef = useRef(false)
+  const selectStartedAtRef = useRef(0)
+  const lastSelectionActivityAtRef = useRef(0)
   const lastPointerClientRef = useRef<{ x: number; y: number } | null>(null)
   const lastPresentAtRef = useRef(0)
   const pointerStartRef = useRef<{ x: number; y: number } | null>(null)
   const pointerMovePxRef = useRef(0)
   const isCompactRef = useRef(false)
-  const [isCompact, setIsCompact] = useState(() =>
-    typeof window !== 'undefined' ? window.matchMedia('(max-width: 860px)').matches : false,
-  )
+  const [isCompact, setIsCompact] = useState(() => {
+    if (typeof window === 'undefined') return false
+    return (
+      window.matchMedia('(max-width: 860px)').matches ||
+      window.matchMedia('(pointer: coarse)').matches
+    )
+  })
 
   const [loading, setLoading] = useState(true)
   const [page, setPage] = useState(1)
@@ -143,25 +197,49 @@ export default function PdfReaderPage({ book }: Props) {
   const scrubOriginPendingRef = useRef(false)
   const [totalPages, setTotalPages] = useState(0)
   const [pageInput, setPageInput] = useState('1')
-  const [scale, setScale] = useState(() => {
-    const fromUser = Number(user?.preferences?.reader_pdf_scale)
-    if (fromUser >= 0.6 && fromUser <= 2.5) return fromUser
-    const fromLocal = Number(localStorage.getItem('moyin_reader_pdf_scale'))
-    if (fromLocal >= 0.6 && fromLocal <= 2.5) return fromLocal
-    return 1.15
-  })
+  /** 有按书记忆则用记忆；否则等容器就绪后自适应，scaleReady 前不渲染页 */
+  const [scale, setScale] = useState(() => loadBookPdfScale(book.id) ?? 1)
+  const [scaleReady, setScaleReady] = useState(() => loadBookPdfScale(book.id) != null)
+  const scaleRef = useRef(scale)
+  /** 放大后内容超出视口：需单指拖动，卸掉中部翻页层/左右热区 */
+  const [canPan, setCanPan] = useState(false)
+  const canPanRef = useRef(false)
+  useEffect(() => {
+    scaleRef.current = scale
+  }, [scale])
+  useEffect(() => {
+    canPanRef.current = canPan
+  }, [canPan])
+
+  // 移动端放大可拖时固定显示顶/底栏（中部点按层已卸掉，否则栏藏了唤不回）
+  useEffect(() => {
+    if (canPan && isCompact) setChromeVisible(true)
+  }, [canPan, isCompact])
+  const suppressChromeToggleRef = useRef(false)
+  const lastContentTapRef = useRef({ t: 0, x: 0, y: 0 })
+  /** 跨屏时 DPR 变化需重绘，否则仍糊 */
+  const [pixelRatioTick, setPixelRatioTick] = useState(0)
   const [isFullscreen, setIsFullscreen] = useState(false)
   const [wheelPageTurn, setWheelPageTurn] = useState(true)
   const wheelEnabledRef = useRef(true)
   const lastWheelAtRef = useRef(0)
   const [showJournal, setShowJournal] = useState(false)
-  const [drawerTab, setDrawerTab] = useState<'journal' | 'notes' | null>(null)
+  const [drawerTab, setDrawerTab] = useState<'journal' | 'notes' | 'translate' | null>(null)
+  const [showPdfSettings, setShowPdfSettings] = useState(false)
   const [noteContent, setNoteContent] = useState('')
   const [noteSaveState, setNoteSaveState] = useState<'idle' | 'saving' | 'saved'>('idle')
   const [journalMode, setJournalMode] = useState<'edit' | 'preview'>('edit')
   const [chromeVisible, setChromeVisible] = useState(true)
   const reduceMotion = useReducedMotion()
   const [selection, setSelection] = useState<PdfSelectionState | null>(null)
+  const autoTranslate = user?.preferences?.reader_auto_translate !== false
+  const {
+    bubble: translateBubble,
+    panel: translatePanel,
+    translateNow,
+    openPanelFromBubble,
+    askExplain,
+  } = useReaderSelectionTranslate(selection?.text, autoTranslate)
   const [basketPage, setBasketPage] = useState('')
   const [projects, setProjects] = useState<CitationProject[]>([])
   const [basketProjectId, setBasketProjectId] = useState('')
@@ -202,6 +280,7 @@ export default function PdfReaderPage({ book }: Props) {
   }, [page])
 
   useReaderChromeInset(shellRef)
+  useReaderExitBackGesture(shellRef, navigate, isCompact)
   const { width: journalWidth, onResizePointerDown: onJournalResizePointerDown } = useJournalDrawerWidth()
 
   useEffect(() => {
@@ -216,14 +295,20 @@ export default function PdfReaderPage({ book }: Props) {
   }, [isFullscreen])
 
   useEffect(() => {
-    const mq = window.matchMedia('(max-width: 860px)')
+    const mqWidth = window.matchMedia('(max-width: 860px)')
+    const mqTouch = window.matchMedia('(pointer: coarse)')
     const sync = () => {
-      isCompactRef.current = mq.matches
-      setIsCompact(mq.matches)
+      const compact = mqWidth.matches || mqTouch.matches
+      isCompactRef.current = compact
+      setIsCompact(compact)
     }
     sync()
-    mq.addEventListener('change', sync)
-    return () => mq.removeEventListener('change', sync)
+    mqWidth.addEventListener('change', sync)
+    mqTouch.addEventListener('change', sync)
+    return () => {
+      mqWidth.removeEventListener('change', sync)
+      mqTouch.removeEventListener('change', sync)
+    }
   }, [])
 
   useEffect(() => {
@@ -271,18 +356,110 @@ export default function PdfReaderPage({ book }: Props) {
     }
   }, [basketProjectId])
 
-  function changeScale(delta: number) {
-    setScale((prev) => {
-      const next = Math.min(2.5, Math.max(0.6, Math.round((prev + delta) * 10) / 10))
-      try {
-        localStorage.setItem('moyin_reader_pdf_scale', String(next))
-      } catch {
-        /* private mode */
-      }
-      if (user) void updatePreferences({ reader_pdf_scale: next })
-      return next
-    })
+  function clearPinchPreview() {
+    const el = pageRef.current
+    if (!el) return
+    el.classList.remove('is-pinching')
+    el.style.transform = ''
+    el.style.willChange = ''
   }
+
+  function persistPdfScale(next: number) {
+    const clamped = clampPdfScale(next)
+    scaleRef.current = clamped
+    setScale(clamped)
+    setScaleReady(true)
+    saveBookPdfScale(book.id, clamped)
+    return clamped
+  }
+
+  function changeScale(delta: number) {
+    persistPdfScale(scaleRef.current + delta)
+  }
+
+  /** 双击内容区：清记忆缩放并回到视口自适应 */
+  async function resetToFitScale() {
+    clearPinchPreview()
+    dismissSelection()
+    setActiveHighlight(null)
+    setChromeVisible(true)
+    clearBookPdfScale(book.id)
+    const box = containerRef.current
+    const pdf = pdfRef.current
+    if (!box || !pdf) {
+      setScaleReady(false)
+      return
+    }
+    const next = await computePdfFitScale(
+      pdf,
+      box.clientWidth,
+      box.clientHeight,
+      currentPageRef.current || 1,
+    )
+    const changed = Math.abs(next - scaleRef.current) > 0.02 || canPanRef.current
+    scaleRef.current = next
+    setScale(next)
+    setScaleReady(true)
+    box.scrollLeft = 0
+    box.scrollTop = 0
+    canPanRef.current = false
+    setCanPan(false)
+    if (changed) {
+      toast.message('已恢复自适应尺寸', { duration: 1400, id: 'pdf-fit' })
+    }
+  }
+
+  // 换书：有记忆直接用；无记忆等自适应
+  useEffect(() => {
+    const remembered = loadBookPdfScale(book.id)
+    if (remembered != null) {
+      scaleRef.current = remembered
+      setScale(remembered)
+      setScaleReady(true)
+    } else {
+      scaleRef.current = 1
+      setScale(1)
+      setScaleReady(false)
+    }
+  }, [book.id])
+
+  // 新书无记忆：按当前页适配视口（整页 contain）；容器未布局完时用 ResizeObserver 重试
+  useEffect(() => {
+    if (loading || scaleReady || !pdfRef.current) return
+    const el = containerRef.current
+    if (!el) return
+    let cancelled = false
+
+    async function resolveFit() {
+      if (cancelled || !pdfRef.current) return
+      const box = containerRef.current
+      if (!box || box.clientWidth < 40 || box.clientHeight < 40) return
+      const remembered = loadBookPdfScale(book.id)
+      const next =
+        remembered ??
+        (await computePdfFitScale(
+          pdfRef.current,
+          box.clientWidth,
+          box.clientHeight,
+          currentPageRef.current || 1,
+        ))
+      if (cancelled) return
+      scaleRef.current = next
+      setScale(next)
+      setScaleReady(true)
+      // 自适应不落盘；只有用户手动调过才记忆
+    }
+
+    void resolveFit()
+    const ro = new ResizeObserver(() => {
+      void resolveFit()
+    })
+    ro.observe(el)
+    return () => {
+      cancelled = true
+      ro.disconnect()
+    }
+  }, [loading, scaleReady, book.id, totalPages])
 
   useEffect(() => {
     const el = containerRef.current
@@ -295,6 +472,7 @@ export default function PdfReaderPage({ book }: Props) {
       if (now - lastWheelAtRef.current < 280) return
       lastWheelAtRef.current = now
       e.preventDefault()
+      suppressProgressSaveRef.current = false
       if (e.deltaY > 0) setPage((p) => Math.min(totalPages || p, p + 1))
       else setPage((p) => Math.max(1, p - 1))
     }
@@ -315,6 +493,7 @@ export default function PdfReaderPage({ book }: Props) {
         setNoteContent(note.content || '')
 
         const token = getToken()
+        await ensurePdfWorker()
         const loadingTask = getDocument({
           url: `/api/books/${book.id}/read`,
           httpHeaders: token ? { Authorization: `Bearer ${token}` } : undefined,
@@ -329,19 +508,37 @@ export default function PdfReaderPage({ book }: Props) {
         const restart = searchParams.get('restart') === '1'
         const fromCfi = pdfTargetPage(searchParams.get('cfi') || '')
         const clamp = (n: number) => Math.min(pdf.numPages, Math.max(1, n))
+        suppressProgressSaveRef.current = isReaderPeekMode(searchParams)
         if (restart) {
+          suppressProgressSaveRef.current = false
           setPage(1)
         } else if (fromCfi) {
-          // 搜索/高亮深链优先于阅读进度
+          // 搜索/高亮深链优先于阅读进度；peek 模式下不写回进度
           setPage(clamp(fromCfi))
         } else {
-          const savedPage = Number.parseInt(progress.location || '', 10)
-          const startPage =
-            Number.isFinite(savedPage) && savedPage >= 1 && savedPage <= pdf.numPages ? savedPage : 1
+          // location 为页码；若缺失/失效，用已存百分比换算，避免「继续阅读 26% 却从第 1 页开」
+          const savedPage = Number.parseInt(String(progress.location || '').trim(), 10)
+          const rawPct = Number(progress.percent) || 0
+          const savedPct = rawPct > 1.5 ? rawPct / 100 : rawPct
+          let startPage = 1
+          if (Number.isFinite(savedPage) && savedPage >= 1 && savedPage <= pdf.numPages) {
+            startPage = savedPage
+          } else if (savedPct >= 0.005 && pdf.numPages > 0) {
+            startPage = clamp(Math.max(1, Math.round(savedPct * pdf.numPages)))
+          }
           setPage(startPage)
         }
       } catch (err) {
-        if (!cancelled) toast.error(err instanceof ApiError ? err.message : '打开 PDF 失败')
+        if (!cancelled) {
+          const msg =
+            err instanceof ApiError
+              ? err.message
+              : err instanceof Error && err.message
+                ? `打开 PDF 失败：${err.message}`
+                : '打开 PDF 失败'
+          toast.error(msg)
+          console.error('[PdfReader] open failed', err)
+        }
       } finally {
         if (!cancelled) setLoading(false)
       }
@@ -381,11 +578,14 @@ export default function PdfReaderPage({ book }: Props) {
   useEffect(() => {
     if (loading || totalPages < 1 || !pdfRef.current) return
     if (searchParams.get('restart') === '1') {
+      suppressProgressSaveRef.current = false
       setPage(1)
       return
     }
     const fromCfi = pdfTargetPage(searchParams.get('cfi') || '')
     if (!fromCfi) return
+    // 会话中再次被引用/搜索定位：暂不改进度
+    suppressProgressSaveRef.current = true
     const next = Math.min(totalPages, Math.max(1, fromCfi))
     if (next !== currentPageRef.current) pushNavBackPoint()
     setPage(next)
@@ -495,13 +695,28 @@ export default function PdfReaderPage({ book }: Props) {
         const pdfPage: PDFPageProxy = await pdf.getPage(page)
         if (token !== renderTokenRef.current) return
 
-        const viewport = pdfPage.getViewport({ scale })
-        const context = canvas.getContext('2d')
+        // HiDPI：按 devicePixelRatio 提高 canvas 像素密度，避免网页/手机发糊
+        const cssViewport = pdfPage.getViewport({ scale })
+        const pixelRatio = Math.min(window.devicePixelRatio || 1, 3)
+        const viewport =
+          pixelRatio === 1
+            ? cssViewport
+            : pdfPage.getViewport({ scale: scale * pixelRatio })
+        const context = canvas.getContext('2d', { alpha: false })
         if (!context) return
-        canvas.height = viewport.height
-        canvas.width = viewport.width
-        pageEl.style.width = `${Math.floor(viewport.width)}px`
-        pageEl.style.height = `${Math.floor(viewport.height)}px`
+        const cssW = Math.floor(cssViewport.width)
+        const cssH = Math.floor(cssViewport.height)
+        // 先清 pinch 预览再改布局，避免「新尺寸 × CSS scale」叠成过大；旧位图会短暂拉伸过渡
+        clearPinchPreview()
+        canvas.width = Math.floor(viewport.width)
+        canvas.height = Math.floor(viewport.height)
+        canvas.style.width = `${cssW}px`
+        canvas.style.height = `${cssH}px`
+        pageEl.style.width = `${cssW}px`
+        pageEl.style.height = `${cssH}px`
+        context.setTransform(1, 0, 0, 1, 0, 0)
+        context.imageSmoothingEnabled = true
+        context.imageSmoothingQuality = 'high'
 
         await pdfPage.render({ canvasContext: context, viewport }).promise
         if (token !== renderTokenRef.current) return
@@ -523,12 +738,13 @@ export default function PdfReaderPage({ book }: Props) {
           }
         }
 
-        textLayerEl.style.width = `${Math.floor(viewport.width)}px`
-        textLayerEl.style.height = `${Math.floor(viewport.height)}px`
+        // 文字层按 CSS 像素对齐（与 canvas 显示尺寸一致，不乘 DPR）
+        textLayerEl.style.width = `${cssW}px`
+        textLayerEl.style.height = `${cssH}px`
         const textLayer = new TextLayer({
           textContentSource: textContent,
           container: textLayerEl,
-          viewport,
+          viewport: cssViewport,
         })
         textLayerInstRef.current = textLayer
         await textLayer.render()
@@ -538,8 +754,10 @@ export default function PdfReaderPage({ book }: Props) {
         // 文字层就绪后再闪搜索命中（首页/全库检索深链）
         applyPdfSearchFlash(true)
 
+        if (suppressProgressSaveRef.current) return
         if (saveTimerRef.current) clearTimeout(saveTimerRef.current)
         saveTimerRef.current = setTimeout(() => {
+          if (suppressProgressSaveRef.current) return
           api
             .put(`/api/books/${book.id}/progress`, {
               location: String(page),
@@ -547,13 +765,15 @@ export default function PdfReaderPage({ book }: Props) {
             })
             .catch(() => {})
         }, 600)
+
       } catch {
+        clearPinchPreview()
         // 翻页竞态时忽略
       }
     }
-    if (!loading) void renderPage()
+    if (!loading && scaleReady) void renderPage()
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [page, scale, loading, book.id, totalPages])
+  }, [page, scale, loading, scaleReady, book.id, totalPages, pixelRatioTick])
 
   // 高亮列表变化后重绘当前页
   useEffect(() => {
@@ -563,19 +783,120 @@ export default function PdfReaderPage({ book }: Props) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [highlights, page])
 
-  function goPrev() {
-    dismissSelection()
-    setActiveHighlight(null)
-    setPage((p) => Math.max(1, p - 1))
-    if (isCompactRef.current) setChromeVisible(false)
+  const goPrevRef = useRef<() => void>(() => {})
+  const goNextRef = useRef<() => void>(() => {})
+  const lastPageTurnAtRef = useRef(0)
+  /** 移动端划词模式：卸掉中部滑动层，便于选字 */
+  const [midSelectMode, setMidSelectMode] = useState(false)
+  const midSelectPinnedRef = useRef(false)
+  const mobilePresentRef = useRef<() => boolean>(() => false)
+  const lastSwipeAtRef = useRef(0)
+
+  useEffect(() => {
+    if (selection) setMidSelectMode(true)
+  }, [selection])
+
+  useEffect(() => {
+    if (selection && isCompact) setChromeVisible(true)
+  }, [selection, isCompact])
+
+  const [selectionChromeEl, setSelectionChromeEl] = useState<HTMLDivElement | null>(null)
+
+  // 无选区时超时退出划词；有选区则保持；顶栏开关钉住时不自动退出
+  useEffect(() => {
+    if (selection || !midSelectMode || midSelectPinnedRef.current) return
+    const t = window.setTimeout(() => setMidSelectMode(false), 8000)
+    return () => window.clearTimeout(t)
+  }, [selection, midSelectMode])
+
+  useEffect(() => {
+    if (!isCompact) return
+    if (!midSelectMode && !selection) return
+    const quietMs = isAppleTouchDevice() ? 900 : 700
+    const tick = () => {
+      if (Date.now() - lastSwipeAtRef.current < 400) return
+      if (selectionRef.current) {
+        const live = selectionText()
+        if (live) {
+          lastSelectionActivityAtRef.current = Date.now()
+          if (live !== selectionRef.current.text) {
+            selectingRef.current = false
+            // 通过 mobilePresent 强制刷新（内部 presentSelection）
+            mobilePresentRef.current()
+          }
+          return
+        }
+        if (Date.now() - lastPresentAtRef.current < 280) return
+        bubbleInteractingRef.current = false
+        // 安静轮询清选区：保留顶栏钉住的划词模式（iOS 拖手柄时选区会瞬空）
+        dismissSelection({ keepAnnotate: true })
+        return
+      }
+      if (Date.now() - lastSelectionActivityAtRef.current < quietMs) return
+      mobilePresentRef.current()
+    }
+    const id = window.setInterval(tick, 280)
+    return () => window.clearInterval(id)
+  }, [isCompact, midSelectMode, selection])
+
+  function enterAnnotateMode(opts?: { pinned?: boolean; toast?: boolean }) {
+    setMidSelectMode(true)
+    if (opts?.pinned) midSelectPinnedRef.current = true
+    if (opts?.toast !== false) {
+      toast.message('划词已开启：请再长按文字拖选', {
+        id: 'moyin-annotate-mode',
+        duration: 2200,
+        icon: null,
+      })
+    }
   }
 
-  function goNext() {
+  function exitAnnotateMode() {
+    midSelectPinnedRef.current = false
+    setMidSelectMode(false)
+  }
+
+  function toggleAnnotateMode() {
+    if (midSelectMode && midSelectPinnedRef.current) {
+      exitAnnotateMode()
+      return
+    }
+    if (midSelectMode && !selection) {
+      exitAnnotateMode()
+      return
+    }
+    enterAnnotateMode({ pinned: true })
+  }
+
+  function applyPageTurn(nextPage: number) {
     dismissSelection()
     setActiveHighlight(null)
-    setPage((p) => Math.min(totalPages || p, p + 1))
-    if (isCompactRef.current) setChromeVisible(false)
+    midSelectPinnedRef.current = false
+    setMidSelectMode(false)
+    suppressProgressSaveRef.current = false
+    setPage(nextPage)
+    // 放大可拖时栏须常显，否则中部点按层已卸掉，藏了唤不回
+    if (isCompactRef.current && !canPanRef.current) setChromeVisible(false)
   }
+
+  function goPrev() {
+    if (isReaderPinchBlocking()) return
+    const now = Date.now()
+    if (now - lastPageTurnAtRef.current < 280) return
+    lastPageTurnAtRef.current = now
+    dismissSelection()
+    applyPageTurn(Math.max(1, page - 1))
+  }
+  function goNext() {
+    if (isReaderPinchBlocking()) return
+    const now = Date.now()
+    if (now - lastPageTurnAtRef.current < 280) return
+    lastPageTurnAtRef.current = now
+    dismissSelection()
+    applyPageTurn(Math.min(totalPages || page, page + 1))
+  }
+  goPrevRef.current = goPrev
+  goNextRef.current = goNext
 
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
@@ -591,80 +912,179 @@ export default function PdfReaderPage({ book }: Props) {
     return () => document.removeEventListener('keydown', onKey)
   })
 
+  // 缩放/换页后：内容是否超出视口 → 进入可拖动态
+  useEffect(() => {
+    const el = containerRef.current
+    if (!el || loading || !scaleReady) {
+      setCanPan(false)
+      canPanRef.current = false
+      return
+    }
+    let raf = 0
+    const check = () => {
+      const next =
+        el.scrollWidth > el.clientWidth + 8 || el.scrollHeight > el.clientHeight + 8
+      canPanRef.current = next
+      setCanPan(next)
+    }
+    const schedule = () => {
+      cancelAnimationFrame(raf)
+      raf = requestAnimationFrame(() => {
+        raf = requestAnimationFrame(check)
+      })
+    }
+    schedule()
+    const ro = new ResizeObserver(schedule)
+    ro.observe(el)
+    return () => {
+      cancelAnimationFrame(raf)
+      ro.disconnect()
+    }
+  }, [scale, page, loading, scaleReady])
+
+  // 进入可拖 / 换页时水平居中一次；捏合改 scale 时勿重置，否则刚拖到的位置会被拉回
+  useEffect(() => {
+    if (!canPan) return
+    const el = containerRef.current
+    if (!el) return
+    const id = requestAnimationFrame(() => {
+      const maxX = el.scrollWidth - el.clientWidth
+      if (maxX > 0) el.scrollLeft = maxX / 2
+    })
+    return () => cancelAnimationFrame(id)
+  }, [canPan, page])
+
   useEffect(() => {
     const el = containerRef.current
     if (!el) return
     let startX = 0
     let startY = 0
-    let moved = false
+    let maxAbsDx = 0
+    let maxAbsDy = 0
+    let peakDx = 0
+    let multiTouch = false
+    const swipeOpts = () =>
+      isCompactRef.current
+        ? { threshold: SWIPE_THRESHOLD_COMPACT_PX, axisRatio: SWIPE_AXIS_RATIO_COMPACT }
+        : undefined
     const onStart = (e: TouchEvent) => {
+      if (e.touches.length >= 2 || isReaderPinchBlocking()) {
+        multiTouch = true
+        markTouchGestureMulti()
+        return
+      }
+      multiTouch = false
       const t = e.touches[0]
       if (!t) return
       startX = t.clientX
       startY = t.clientY
-      moved = false
+      maxAbsDx = 0
+      maxAbsDy = 0
+      peakDx = 0
     }
     const onMove = (e: TouchEvent) => {
-      const t = e.touches[0]
-      if (!t) return
-      if (Math.abs(t.clientX - startX) > 12 || Math.abs(t.clientY - startY) > 12) moved = true
-    }
-    const onEnd = (e: TouchEvent) => {
-      if (selectingRef.current || selectionRef.current) return
-      const sel = window.getSelection()
-      if (sel && !sel.isCollapsed && sel.toString().trim()) return
-      const t = e.changedTouches[0]
-      if (!t || !moved) return
-      const dx = t.clientX - startX
-      const dy = t.clientY - startY
-      const threshold = 40
-      if (Math.abs(dy) > threshold && Math.abs(dy) > Math.abs(dx) * 1.15) {
-        if (dy < 0) goNext()
-        else goPrev()
+      if (e.touches.length >= 2 || isReaderPinchBlocking()) {
+        multiTouch = true
+        markTouchGestureMulti()
         return
       }
-      if (Math.abs(dx) > threshold && Math.abs(dx) > Math.abs(dy) * 1.15) {
-        if (dx < 0) goNext()
-        else goPrev()
+      if (multiTouch) return
+      // 放大可拖动：绝不能 preventDefault，否则视口滚不动
+      if (canPanRef.current) return
+      const t = e.touches[0]
+      if (!t) return
+      const dx = t.clientX - startX
+      const dy = t.clientY - startY
+      maxAbsDx = Math.max(maxAbsDx, Math.abs(dx))
+      maxAbsDy = Math.max(maxAbsDy, Math.abs(dy))
+      if (Math.abs(dx) >= Math.abs(peakDx)) peakDx = dx
+      // 已有选区时用户可能在拖手柄，绝不清选区
+      if (selectionText() || selectionRef.current) return
+      // 中部明确横滑：清掉误触选区，避免划词逻辑吞掉翻页
+      if (
+        isCompactRef.current &&
+        maxAbsDx >= SWIPE_INTENT_PX &&
+        maxAbsDx > maxAbsDy * SWIPE_AXIS_RATIO_COMPACT
+      ) {
+        const rect = el.getBoundingClientRect()
+        const xRatio = (startX - rect.left) / Math.max(1, rect.width)
+        if (xRatio >= 0.14 && xRatio <= 0.86) {
+          clearDomSelection()
+          selectingRef.current = false
+          lastSelectionActivityAtRef.current = 0
+          if (e.cancelable) e.preventDefault()
+        }
       }
     }
+    const onEnd = (e: TouchEvent) => {
+      if (!isCompactRef.current) return
+      if (canPanRef.current) return
+      if (multiTouch || e.touches.length >= 1 || isReaderPinchBlocking()) {
+        if (e.touches.length === 0) multiTouch = false
+        return
+      }
+      const t = e.changedTouches[0]
+      if (!t) return
+      const rect = el.getBoundingClientRect()
+      const xRatio = (startX - rect.left) / Math.max(1, rect.width)
+      // 左右边缘留给点击热区，中部滑动翻页
+      if (xRatio < 0.14 || xRatio > 0.86) return
+      const byEnd = resolveHorizontalSwipe(
+        { clientX: startX, clientY: startY },
+        { clientX: t.clientX, clientY: t.clientY },
+        swipeOpts(),
+      )
+      const byTravel = resolveHorizontalSwipeByTravel(peakDx, maxAbsDx, maxAbsDy, swipeOpts())
+      const dir = byEnd.direction || byTravel.direction
+      if (!dir) return
+      // 已有稳定选区时优先留给调手柄，不翻页
+      if (selectionText() || selectionRef.current) return
+      // 明确横滑时优先翻页（即使过程中短暂选出了字）
+      clearDomSelection()
+      selectingRef.current = false
+      lastSelectionActivityAtRef.current = 0
+      if (dir === 'next') goNextRef.current()
+      else goPrevRef.current()
+    }
     el.addEventListener('touchstart', onStart, { passive: true })
-    el.addEventListener('touchmove', onMove, { passive: true })
+    el.addEventListener('touchmove', onMove, { passive: false })
     el.addEventListener('touchend', onEnd, { passive: true })
     return () => {
       el.removeEventListener('touchstart', onStart)
       el.removeEventListener('touchmove', onMove)
       el.removeEventListener('touchend', onEnd)
     }
-  }, [totalPages])
+  }, [])
 
-  function presentSelection(force = false, pointerClient?: { x: number; y: number } | null) {
-    if (!force && selectingRef.current) return
+  function presentSelection(force = false, pointerClient?: { x: number; y: number } | null): boolean {
+    if (!force && selectingRef.current) return false
     const textLayerEl = textLayerRef.current
     const viewportEl = containerRef.current
-    if (!textLayerEl || !viewportEl) return
+    if (!textLayerEl || !viewportEl) return false
     const text = selectionText()
-    if (!force && !isIntentionalTextSelection(text, pointerMovePxRef.current)) {
+    const gestureMs = selectStartedAtRef.current ? Date.now() - selectStartedAtRef.current : undefined
+    if (!force && isAccidentalTapSelection(text, pointerMovePxRef.current, gestureMs)) {
       clearDomSelection()
-      return
+      return false
     }
     const mapped = selectionToPdfLocator(textLayerEl, textDivsRef.current, page)
     if (!mapped) {
-      if (!force) clearDomSelection()
-      return
+      // 扩选过程中 locator 偶发解析失败：保留 DOM 选区，勿清
+      return false
     }
-    if (!force && !isIntentionalTextSelection(mapped.text, pointerMovePxRef.current)) {
+    if (!force && isAccidentalTapSelection(mapped.text, pointerMovePxRef.current, gestureMs)) {
       clearDomSelection()
-      return
+      return false
     }
     if (
       !force &&
       Date.now() - lastPresentAtRef.current < 50 &&
       selectionRef.current?.text === mapped.text
     ) {
-      return
+      return true
     }
-    let anchor = isCompactRef.current ? null : rangeToAnchor(mapped.range, viewportEl)
+    let anchor = rangeToAnchor(mapped.range, viewportEl)
+    const screen = rangeToScreenBounds(mapped.range, null)
     if (anchor) {
       const ptrClient = pointerClient ?? lastPointerClientRef.current
       const wrapRect = viewportEl.getBoundingClientRect()
@@ -678,32 +1098,113 @@ export default function PdfReaderPage({ book }: Props) {
           )
         : null
       anchor = withPointer(anchor, pointer)
+      if (anchor && screen) anchor = { ...anchor, screen }
+    } else if (screen) {
+      anchor = {
+        x: screen.midX,
+        y: screen.top,
+        height: Math.max(18, screen.bottom - screen.top),
+        screen,
+      }
     }
     const next: PdfSelectionState = { locator: mapped.locator, text: mapped.text, anchor }
     selectionRef.current = next
     lastPresentAtRef.current = Date.now()
+    if (isCompactRef.current) setChromeVisible(true)
     setSelection(next)
     setBasketPage(String(page))
     setActiveHighlight(null)
-    if (isCompactRef.current) setChromeVisible(true)
+    return true
   }
 
   useEffect(() => {
     const textLayerEl = textLayerRef.current
     if (!textLayerEl) return
 
-    let mobileShowTimer: ReturnType<typeof setTimeout> | null = null
+    let settleTimer: ReturnType<typeof setTimeout> | null = null
+    const SELECTION_SETTLE_MS = 520
+    const clearSettleTimer = () => {
+      if (settleTimer) {
+        clearTimeout(settleTimer)
+        settleTimer = null
+      }
+    }
+    const dismissBubble = () => {
+      if (!selectionRef.current) return
+      selectionRef.current = null
+      setSelection(null)
+      setBasketPage('')
+      selectingRef.current = false
+      bubbleInteractingRef.current = false
+      lastSelectionActivityAtRef.current = 0
+      if (!midSelectPinnedRef.current) setMidSelectMode(false)
+    }
+    let touchStartX = 0
+    let touchStartY = 0
+    let touchMaxAbsDx = 0
+    let touchMaxAbsDy = 0
+    let touchPeakDx = 0
+    let lastSwipeAt = 0
+    const swipeOpts = () =>
+      isCompactRef.current
+        ? { threshold: SWIPE_THRESHOLD_COMPACT_PX, axisRatio: SWIPE_AXIS_RATIO_COMPACT }
+        : undefined
+    const tryPresentSelection = (retriesLeft: number): boolean => {
+      if (Date.now() - lastSwipeAt < 400) return false
+      const text = selectionText()
+      if (text) {
+        selectingRef.current = false
+        return presentSelection(true, lastPointerClientRef.current)
+      }
+      if (retriesLeft > 0) {
+        window.setTimeout(() => tryPresentSelection(retriesLeft - 1), 80)
+      }
+      return false
+    }
+    mobilePresentRef.current = () => tryPresentSelection(0)
+
+    const scheduleSettledPresent = () => {
+      clearSettleTimer()
+      if (Date.now() - lastSwipeAt < 400) return
+      if (isCompactRef.current) {
+        const settleMs = isAppleTouchDevice() ? 880 : 680
+        settleTimer = setTimeout(() => {
+          settleTimer = null
+          if (bubbleInteractingRef.current) return
+          if (Date.now() - lastSwipeAt < 400) return
+          const quiet = Date.now() - lastSelectionActivityAtRef.current
+          if (quiet < settleMs - 40) {
+            scheduleSettledPresent()
+            return
+          }
+          selectingRef.current = false
+          if (!tryPresentSelection(0)) tryPresentSelection(10)
+        }, settleMs)
+        return
+      }
+      const snapshot = selectionText()
+      if (!snapshot) return
+      settleTimer = setTimeout(() => {
+        settleTimer = null
+        if (selectingRef.current) return
+        if (bubbleInteractingRef.current) return
+        if (Date.now() - lastSwipeAt < 400) return
+        selectingRef.current = false
+        presentSelection(true, lastPointerClientRef.current)
+      }, SELECTION_SETTLE_MS)
+    }
 
     const onPointerDown = (e: PointerEvent) => {
       selectingRef.current = true
+      selectStartedAtRef.current = Date.now()
       pointerStartRef.current = { x: e.clientX, y: e.clientY }
       lastPointerClientRef.current = { x: e.clientX, y: e.clientY }
       pointerMovePxRef.current = 0
-      if (!bubbleInteractingRef.current && selectionRef.current) {
-        selectionRef.current = null
-        setSelection(null)
-        setBasketPage('')
-      }
+      clearSettleTimer()
+      if (bubbleInteractingRef.current) return
+      // 移动端功能条在底栏：拖动手柄时保留，避免选区被拆掉重建
+      if (isCompactRef.current) return
+      dismissBubble()
     }
     const onPointerMove = (e: PointerEvent) => {
       lastPointerClientRef.current = { x: e.clientX, y: e.clientY }
@@ -752,31 +1253,179 @@ export default function PdfReaderPage({ book }: Props) {
       if (delay <= 0) run()
       else window.setTimeout(run, delay)
     }
+    const syncOrPresentAfterTouch = () => {
+      if (!isCompactRef.current) {
+        scheduleSettledPresent()
+        return
+      }
+      if (selectionText()) {
+        presentSelection(true, lastPointerClientRef.current)
+        return
+      }
+      if (selectionRef.current) {
+        dismissBubble()
+        return
+      }
+      scheduleSettledPresent()
+    }
     const onPointerUp = (e: PointerEvent) => {
-      if (e.pointerType === 'touch') return
+      if (e.pointerType === 'touch') {
+        selectingRef.current = false
+        lastPointerClientRef.current = { x: e.clientX, y: e.clientY }
+        syncOrPresentAfterTouch()
+        return
+      }
       // 鼠标必须同步弹出：延迟会被随后的 click 抢先清掉选区
       finishSelect(0, { x: e.clientX, y: e.clientY })
     }
     const onPointerCancel = (e: PointerEvent) => {
+      selectingRef.current = false
+      lastPointerClientRef.current = { x: e.clientX, y: e.clientY }
+      if (isCompactRef.current) {
+        syncOrPresentAfterTouch()
+        return
+      }
       finishSelect(0, { x: e.clientX, y: e.clientY })
+    }
+    let touchMulti = false
+    const onTouchStart = (e: TouchEvent) => {
+      if (e.touches.length >= 2 || isReaderPinchBlocking()) {
+        touchMulti = true
+        markTouchGestureMulti()
+        return
+      }
+      touchMulti = false
+      const t = e.touches?.[0]
+      if (!t) return
+      touchStartX = t.clientX
+      touchStartY = t.clientY
+      touchMaxAbsDx = 0
+      touchMaxAbsDy = 0
+      touchPeakDx = 0
+    }
+    const onTouchMove = (e: TouchEvent) => {
+      if (e.touches.length >= 2 || isReaderPinchBlocking()) {
+        touchMulti = true
+        markTouchGestureMulti()
+        return
+      }
+      if (touchMulti) return
+      const t = e.touches?.[0]
+      if (!t) return
+      const dx = t.clientX - touchStartX
+      const dy = t.clientY - touchStartY
+      touchMaxAbsDx = Math.max(touchMaxAbsDx, Math.abs(dx))
+      touchMaxAbsDy = Math.max(touchMaxAbsDy, Math.abs(dy))
+      if (Math.abs(dx) >= Math.abs(touchPeakDx)) touchPeakDx = dx
+      // 已有选区 / 气泡已开：用户在拖手柄，绝不清选区、不 preventDefault
+      if (selectionText() || selectionRef.current) return
+      // 放大拖动画布：不拦截，交给视口滚动
+      if (canPanRef.current) return
+      if (
+        isCompactRef.current &&
+        touchMaxAbsDx >= SWIPE_INTENT_PX &&
+        touchMaxAbsDx > touchMaxAbsDy * SWIPE_AXIS_RATIO_COMPACT
+      ) {
+        clearDomSelection()
+        selectingRef.current = false
+        lastSelectionActivityAtRef.current = 0
+        if (e.cancelable) e.preventDefault()
+      }
     }
     const onTouchEnd = (e: TouchEvent) => {
       const t = e.changedTouches?.[0]
-      finishSelect(40, t ? { x: t.clientX, y: t.clientY } : null)
+      const ptr = t ? { x: t.clientX, y: t.clientY } : null
+      if (ptr) lastPointerClientRef.current = ptr
+      selectingRef.current = false
+      if (touchMulti || e.touches.length >= 1 || isReaderPinchBlocking()) {
+        if (e.touches.length === 0) touchMulti = false
+        return
+      }
+      // 放大拖动画布：不翻页
+      if (canPanRef.current) return
+      // 已有选区或正在调手柄：绝不当成翻页
+      if (selectionText() || selectionRef.current) {
+        syncOrPresentAfterTouch()
+        return
+      }
+      // 明确横滑：优先翻页（划过文字时浏览器常会短暂出选区）
+      if (t) {
+        const byEnd = resolveHorizontalSwipe(
+          { clientX: touchStartX, clientY: touchStartY },
+          { clientX: t.clientX, clientY: t.clientY },
+          swipeOpts(),
+        )
+        const byTravel = resolveHorizontalSwipeByTravel(
+          touchPeakDx,
+          touchMaxAbsDx,
+          touchMaxAbsDy,
+          swipeOpts(),
+        )
+        const dir = byEnd.direction || byTravel.direction
+        if (dir) {
+          clearSettleTimer()
+          clearDomSelection()
+          dismissBubble()
+          lastSelectionActivityAtRef.current = 0
+          lastSwipeAt = Date.now()
+          lastSwipeAtRef.current = lastSwipeAt
+          e.stopPropagation()
+          if (dir === 'next') goNextRef.current()
+          else goPrevRef.current()
+          return
+        }
+      }
+      // 已有选区 / 刚划过词：只出功能面板
+      scheduleSettledPresent()
     }
+    let clearTimer: ReturnType<typeof setTimeout> | null = null
     const onSelectionChange = () => {
       if (bubbleInteractingRef.current) return
       const sel = window.getSelection()
-      if (!sel || sel.isCollapsed) return
+      if (!sel || sel.isCollapsed) {
+        clearSettleTimer()
+        // 取消选中必须关掉气泡；刚弹出时系统可能瞬间清空，延迟到 keep 窗口后再确认
+        if (!selectionRef.current) return
+        if (clearTimer) clearTimeout(clearTimer)
+        const keepMs = isAppleTouchDevice() ? 360 : 220
+        const age = Date.now() - lastPresentAtRef.current
+        const delay = Math.max(100, keepMs - age + 30)
+        clearTimer = setTimeout(() => {
+          clearTimer = null
+          if (selectionText()) return
+          bubbleInteractingRef.current = false
+          dismissBubble()
+        }, delay)
+        return
+      }
       if (!textLayerEl.contains(sel.anchorNode)) return
-      // 桌面划词中不弹；移动端手柄拖动防抖刷新
-      if (!isCompactRef.current) return
-      if (selectingRef.current) return
-      if (mobileShowTimer) clearTimeout(mobileShowTimer)
-      mobileShowTimer = setTimeout(() => {
-        mobileShowTimer = null
-        presentSelection()
-      }, 320)
+      const text = sel.toString().trim()
+      if (!text) return
+      if (clearTimer) {
+        clearTimeout(clearTimer)
+        clearTimer = null
+      }
+      lastSelectionActivityAtRef.current = Date.now()
+      if (!selectStartedAtRef.current) selectStartedAtRef.current = Date.now()
+      if (isCompactRef.current) {
+        // 底栏已开：拖动手柄时立刻同步全文
+        if (selectionRef.current) {
+          if (selectionRef.current.text !== text) {
+            presentSelection(true, lastPointerClientRef.current)
+          }
+        } else {
+          scheduleSettledPresent()
+        }
+        return
+      }
+      if (selectingRef.current) {
+        dismissBubble()
+        return
+      }
+      if (selectionRef.current && selectionRef.current.text !== text) {
+        dismissBubble()
+      }
+      scheduleSettledPresent()
     }
     const onContextMenu = (e: MouseEvent) => {
       // 让气泡接管，避免系统菜单挡操作（桌面仍可 Cmd/Ctrl+C）
@@ -792,15 +1441,20 @@ export default function PdfReaderPage({ book }: Props) {
     textLayerEl.addEventListener('pointermove', onPointerMove)
     textLayerEl.addEventListener('pointerup', onPointerUp)
     textLayerEl.addEventListener('pointercancel', onPointerCancel)
+    textLayerEl.addEventListener('touchstart', onTouchStart, { passive: true })
+    textLayerEl.addEventListener('touchmove', onTouchMove, { passive: false })
     textLayerEl.addEventListener('touchend', onTouchEnd)
     textLayerEl.addEventListener('contextmenu', onContextMenu)
     document.addEventListener('selectionchange', onSelectionChange)
     return () => {
-      if (mobileShowTimer) clearTimeout(mobileShowTimer)
+      clearSettleTimer()
+      if (clearTimer) clearTimeout(clearTimer)
       textLayerEl.removeEventListener('pointerdown', onPointerDown)
       textLayerEl.removeEventListener('pointermove', onPointerMove)
       textLayerEl.removeEventListener('pointerup', onPointerUp)
       textLayerEl.removeEventListener('pointercancel', onPointerCancel)
+      textLayerEl.removeEventListener('touchstart', onTouchStart)
+      textLayerEl.removeEventListener('touchmove', onTouchMove)
       textLayerEl.removeEventListener('touchend', onTouchEnd)
       textLayerEl.removeEventListener('contextmenu', onContextMenu)
       document.removeEventListener('selectionchange', onSelectionChange)
@@ -815,14 +1469,20 @@ export default function PdfReaderPage({ book }: Props) {
       return
     }
     dismissSelection()
+    suppressProgressSaveRef.current = false
     setPage(Math.min(totalPages, Math.max(1, n)))
   }
 
   function onViewportClick(e: React.MouseEvent<HTMLDivElement>) {
     if (bubbleInteractingRef.current) return
+    if (selectingRef.current) return
+    // 选区刚变化：忽略合成 click，避免长选区被清掉
+    if (Date.now() - lastSelectionActivityAtRef.current < 1200) return
+    const presentGuardMs = isAppleTouchDevice() ? 1400 : 800
+    if (Date.now() - lastPresentAtRef.current < presentGuardMs) return
     const target = e.target as HTMLElement
     if (target.closest('.pdf-click-zone')) return
-    if (target.closest('.selection-menu') || target.closest('.highlight-popover')) return
+    if (target.closest('.selection-apple') || target.closest('.highlight-popover')) return
     if (target.closest('.textLayer') || target.closest('.pdf-hl')) {
       // 文字层 / 高亮：不翻页
       return
@@ -837,6 +1497,14 @@ export default function PdfReaderPage({ book }: Props) {
     }
     // 左右/上下翻页由透明热区处理；空白处仅用于关闭选区或唤出工具栏
     if (isCompactRef.current) {
+      if (suppressChromeToggleRef.current) {
+        suppressChromeToggleRef.current = false
+        return
+      }
+      if (canPanRef.current) {
+        setChromeVisible(true)
+        return
+      }
       setChromeVisible((v) => !v)
     }
   }
@@ -885,16 +1553,195 @@ export default function PdfReaderPage({ book }: Props) {
     }, 700)
   }
 
-  function dismissSelection() {
+  function dismissSelection(opts?: { keepAnnotate?: boolean }) {
     selectionRef.current = null
     setSelection(null)
     setBasketPage('')
     selectingRef.current = false
+    bubbleInteractingRef.current = false
     lastPointerClientRef.current = null
     pointerStartRef.current = null
     pointerMovePxRef.current = 0
+    lastSelectionActivityAtRef.current = 0
+    selectStartedAtRef.current = 0
     clearDomSelection()
+    if (opts?.keepAnnotate) {
+      if (!midSelectPinnedRef.current) setMidSelectMode(false)
+      return
+    }
+    midSelectPinnedRef.current = false
+    setMidSelectMode(false)
   }
+
+  useEffect(() => {
+    const onResize = () => setPixelRatioTick((n) => n + 1)
+    window.addEventListener('resize', onResize)
+    const mq = window.matchMedia(`(resolution: ${window.devicePixelRatio || 1}dppx)`)
+    const onDpr = () => setPixelRatioTick((n) => n + 1)
+    mq.addEventListener?.('change', onDpr)
+    return () => {
+      window.removeEventListener('resize', onResize)
+      mq.removeEventListener?.('change', onDpr)
+    }
+  }, [])
+
+  usePinchZoom(containerRef, {
+    enabled: isCompact && !loading && scaleReady,
+    previewOnly: true,
+    getValue: () => scaleRef.current,
+    setValue: (next) => {
+      const prev = scaleRef.current
+      persistPdfScale(next)
+      // 几乎没变时直接清预览；有变化则等 render 完成再清
+      if (Math.abs(next - prev) < 0.02) clearPinchPreview()
+    },
+    onPreview: (factor) => {
+      const el = pageRef.current
+      if (!el) return
+      el.classList.add('is-pinching')
+      el.style.willChange = 'transform'
+      el.style.transformOrigin = 'top center'
+      el.style.transform = `scale(${factor})`
+    },
+    min: 0.6,
+    max: 2.5,
+    step: 0.05,
+    onPinchStart: () => {
+      midSelectPinnedRef.current = false
+      setMidSelectMode(false)
+      dismissSelection()
+      if (isCompactRef.current) setChromeVisible(true)
+    },
+    onPinchEnd: () => {
+      if (isCompactRef.current) setChromeVisible(true)
+      // 松手后若仍卡着 CSS 预览，下一帧 render 会清；这里再兜一次
+      window.setTimeout(() => {
+        const el = containerRef.current
+        if (!el) return
+        const next =
+          el.scrollWidth > el.clientWidth + 8 || el.scrollHeight > el.clientHeight + 8
+        canPanRef.current = next
+        setCanPan(next)
+        if (next && isCompactRef.current) setChromeVisible(true)
+      }, 80)
+    },
+  })
+
+  // 移动端双击内容区 → 恢复自适应尺寸
+  // 放大可拖时 touchend/pointerup 常被滚动打断；在第二次 touchstart 判定更稳
+  useEffect(() => {
+    if (!isCompact) return
+    const el = containerRef.current
+    if (!el) return
+    let downX = 0
+    let downY = 0
+    let moved = false
+    let armTap = false
+
+    const ignoreTarget = (t: EventTarget | null) => {
+      if (!(t instanceof Element)) return true
+      return !!t.closest(
+        '.pdf-click-zone, .selection-apple, .highlight-popover, button, a, input, textarea',
+      )
+    }
+
+    const clearArmed = () => {
+      armTap = false
+      moved = false
+      lastContentTapRef.current = { t: 0, x: 0, y: 0 }
+    }
+
+    const onTouchStart = (e: TouchEvent) => {
+      if (e.touches.length !== 1) {
+        clearArmed()
+        return
+      }
+      if (isReaderPinchBlocking()) return
+      if (selectingRef.current || selectionRef.current) return
+      if (bubbleInteractingRef.current) return
+      if (ignoreTarget(e.target)) return
+
+      const t = e.touches[0]
+      const now = Date.now()
+      const prev = lastContentTapRef.current
+      const dt = now - prev.t
+      const dist = Math.hypot(t.clientX - prev.x, t.clientY - prev.y)
+      const maxDt = canPanRef.current ? 450 : 340
+      const maxDist = canPanRef.current ? 80 : 48
+
+      // 第二次按下即视为双击（不依赖第一次 touchend 是否被滚动吞掉）
+      if (prev.t > 0 && dt > 40 && dt < maxDt && dist < maxDist) {
+        clearArmed()
+        suppressChromeToggleRef.current = true
+        if (e.cancelable) e.preventDefault()
+        void resetToFitScale()
+        return
+      }
+
+      downX = t.clientX
+      downY = t.clientY
+      moved = false
+      armTap = true
+      lastContentTapRef.current = { t: now, x: t.clientX, y: t.clientY }
+    }
+
+    const onTouchMove = (e: TouchEvent) => {
+      if (!armTap || e.touches.length !== 1) return
+      const t = e.touches[0]
+      const limit = canPanRef.current ? 28 : 16
+      if (Math.hypot(t.clientX - downX, t.clientY - downY) > limit) {
+        moved = true
+        // 已构成拖动：作废双击候选，但不清零太早以外的逻辑——直接清
+        lastContentTapRef.current = { t: 0, x: 0, y: 0 }
+        armTap = false
+      }
+    }
+
+    const onTouchEnd = (e: TouchEvent) => {
+      if (!armTap) return
+      armTap = false
+      if (moved) {
+        lastContentTapRef.current = { t: 0, x: 0, y: 0 }
+        return
+      }
+      // 长按不算
+      const held = Date.now() - lastContentTapRef.current.t
+      if (held > 480) {
+        lastContentTapRef.current = { t: 0, x: 0, y: 0 }
+      }
+      if (suppressChromeToggleRef.current && e.cancelable) e.preventDefault()
+    }
+
+    const onTouchCancel = () => {
+      // 放大拖动接管滚动：仅作废本次，保留「轻点候选」若几乎没动
+      if (!armTap) return
+      armTap = false
+      if (moved || canPanRef.current) {
+        // canPan 下 cancel 很常见；若没移动，保留 lastContentTap 供第二次 touchstart 配对
+        if (moved) lastContentTapRef.current = { t: 0, x: 0, y: 0 }
+      }
+    }
+
+    const onDblClick = (e: MouseEvent) => {
+      if (ignoreTarget(e.target)) return
+      e.preventDefault()
+      suppressChromeToggleRef.current = true
+      void resetToFitScale()
+    }
+
+    el.addEventListener('touchstart', onTouchStart, { capture: true, passive: false })
+    el.addEventListener('touchmove', onTouchMove, { capture: true, passive: true })
+    el.addEventListener('touchend', onTouchEnd, { capture: true, passive: false })
+    el.addEventListener('touchcancel', onTouchCancel, { capture: true, passive: true })
+    el.addEventListener('dblclick', onDblClick, true)
+    return () => {
+      el.removeEventListener('touchstart', onTouchStart, true)
+      el.removeEventListener('touchmove', onTouchMove, true)
+      el.removeEventListener('touchend', onTouchEnd, true)
+      el.removeEventListener('touchcancel', onTouchCancel, true)
+      el.removeEventListener('dblclick', onDblClick, true)
+    }
+  }, [isCompact, book.id, loading])
 
   async function createHighlight(color: string, note = '') {
     if (!selection) return
@@ -928,6 +1775,7 @@ export default function PdfReaderPage({ book }: Props) {
   function scrubToPercent(nextPercent: number) {
     if (!totalPages) return
     const nextPage = Math.min(totalPages, Math.max(1, Math.round((nextPercent / 100) * totalPages)))
+    suppressProgressSaveRef.current = false
     if (scrubOriginPendingRef.current) {
       if (nextPage !== currentPageRef.current) pushNavBackPoint()
       scrubOriginPendingRef.current = false
@@ -1024,6 +1872,7 @@ export default function PdfReaderPage({ book }: Props) {
   }
 
   function jumpToHighlight(h: Highlight) {
+    suppressProgressSaveRef.current = false
     const loc = parsePdfLocator(h.cfi_range)
     if (loc) {
       setDrawerTab(null)
@@ -1070,10 +1919,11 @@ export default function PdfReaderPage({ book }: Props) {
   }
 
   const pdfHighlights = highlights.filter((h) => isPdfLocator(h.cfi_range) || h.page_no)
+  const chromeShown = chromeVisible || (isCompact && canPan)
 
   return (
     <motion.div
-      className={`reader-shell${chromeVisible ? '' : ' chrome-hidden'}`}
+      className={`reader-shell${chromeShown ? '' : ' chrome-hidden'}`}
       ref={shellRef}
       initial={reduceMotion ? false : { opacity: 0, filter: 'none' }}
       animate={{ opacity: 1, filter: 'none' }}
@@ -1095,12 +1945,12 @@ export default function PdfReaderPage({ book }: Props) {
       <motion.div
         className="reader-topbar"
         initial={false}
-        animate={chromeVisible ? { y: 0, opacity: 1 } : { y: '-105%', opacity: 0 }}
+        animate={chromeShown ? { y: 0, opacity: 1 } : { y: '-105%', opacity: 0 }}
         transition={reduceMotion ? { duration: 0 } : chromeSpring}
-        style={{ pointerEvents: chromeVisible ? 'auto' : 'none' }}
+        style={{ pointerEvents: chromeShown ? 'auto' : 'none' }}
       >
         <div className="reader-topbar-left">
-          <button className="icon-btn" onClick={() => navigate(-1)} title="返回" aria-label="返回">
+          <button className="icon-btn" onClick={() => exitReader(navigate)} title="返回" aria-label="返回">
             <ArrowLeft size={18} />
           </button>
           <ReaderBookIdentity
@@ -1122,20 +1972,47 @@ export default function PdfReaderPage({ book }: Props) {
               {isFullscreen ? <Minimize size={18} /> : <Maximize size={18} />}
             </button>
           )}
-          <button
-            className="icon-btn reader-zoom-btn"
-            onClick={() => changeScale(-0.1)}
-            title="缩小"
-            aria-label="缩小"
-          >
-            <Minus size={16} />
-          </button>
-          <button className="icon-btn reader-zoom-btn" onClick={() => changeScale(0.1)} title="放大" aria-label="放大">
-            <Plus size={16} />
-          </button>
+          {!isCompact && (
+            <>
+              <button
+                className="icon-btn reader-zoom-btn"
+                onClick={() => changeScale(-0.1)}
+                title="缩小"
+                aria-label="缩小"
+              >
+                <Minus size={16} />
+              </button>
+              <button
+                className="icon-btn reader-zoom-btn"
+                onClick={() => changeScale(0.1)}
+                title="放大"
+                aria-label="放大"
+              >
+                <Plus size={16} />
+              </button>
+            </>
+          )}
+          {isCompact && (
+            <button
+              type="button"
+              className={`icon-btn${midSelectMode ? ' active' : ''}`}
+              onPointerDown={(e) => e.stopPropagation()}
+              onClick={(e) => {
+                e.stopPropagation()
+                setShowPdfSettings(false)
+                toggleAnnotateMode()
+              }}
+              title={midSelectMode ? '退出划词' : '划词标注'}
+              aria-label={midSelectMode ? '退出划词' : '划词标注'}
+              aria-pressed={midSelectMode}
+            >
+              <TextSelect size={18} />
+            </button>
+          )}
           <button
             className={`icon-btn ${drawerTab === 'notes' ? 'active' : ''}`}
             onClick={() => {
+              setShowPdfSettings(false)
               if (drawerTab === 'notes') setDrawerTab(null)
               else {
                 setShowJournal(false)
@@ -1146,9 +2023,26 @@ export default function PdfReaderPage({ book }: Props) {
           >
             <Highlighter size={18} />
           </button>
+          {!isCompact && (
+            <button
+              className={`icon-btn ${drawerTab === 'translate' ? 'active' : ''}`}
+              onClick={() => {
+                setShowPdfSettings(false)
+                if (drawerTab === 'translate') setDrawerTab(null)
+                else {
+                  setShowJournal(false)
+                  setDrawerTab('translate')
+                }
+              }}
+              title="划词翻译"
+            >
+              <Languages size={18} />
+            </button>
+          )}
           <button
             className={`icon-btn ${drawerTab === 'journal' || showJournal ? 'active' : ''}`}
             onClick={() => {
+              setShowPdfSettings(false)
               if (drawerTab === 'journal') {
                 setDrawerTab(null)
                 setShowJournal(false)
@@ -1160,11 +2054,55 @@ export default function PdfReaderPage({ book }: Props) {
           >
             <NotebookPen size={18} />
           </button>
+          <button
+            className={`icon-btn ${showPdfSettings ? 'active' : ''}`}
+            onClick={() => {
+              setShowPdfSettings((v) => !v)
+            }}
+            title="阅读设置"
+            aria-label="阅读设置"
+          >
+            <Settings2 size={18} />
+          </button>
         </div>
       </motion.div>
 
+      {showPdfSettings && (
+        <div
+          className="theme-popover"
+          onPointerDown={(e) => e.stopPropagation()}
+          onClick={(e) => e.stopPropagation()}
+        >
+          <div className="theme-popover-title">划词翻译</div>
+          <div className="theme-switch-row">
+            <span>松手后自动翻译</span>
+            <LabSwitch
+              checked={autoTranslate}
+              onChange={(v) => {
+                void updatePreferences({ reader_auto_translate: v })
+              }}
+            />
+          </div>
+        </div>
+      )}
+
       <div className="reader-body">
-        <div className="reader-viewport pdf-viewport" ref={containerRef} onClick={onViewportClick}>
+        <div
+          className={`reader-viewport pdf-viewport${canPan ? ' pdf-viewport--pannable' : ''}`}
+          ref={containerRef}
+          onClick={onViewportClick}
+          onDoubleClick={(e) => {
+            if (!isCompactRef.current) return
+            const t = e.target as HTMLElement
+            if (t.closest('.pdf-click-zone, .selection-apple, .highlight-popover, button, a, input')) {
+              return
+            }
+            e.preventDefault()
+            e.stopPropagation()
+            suppressChromeToggleRef.current = true
+            void resetToFitScale()
+          }}
+        >
           {loading && (
             <div className="empty-state" style={{ position: 'absolute', inset: 0 }}>
               <div className="spinner" />
@@ -1261,49 +2199,69 @@ export default function PdfReaderPage({ book }: Props) {
               </div>
             </div>
           )}
-          <div
-            className="pdf-click-zone left"
-            aria-hidden
-            onPointerDown={suppressZonePointer}
-            onMouseDown={suppressZonePointer}
-            onClick={(e) => {
-              e.stopPropagation()
-              handleZoneClick('prev')
-            }}
-          />
-          <div
-            className="pdf-click-zone right"
-            aria-hidden
-            onPointerDown={suppressZonePointer}
-            onMouseDown={suppressZonePointer}
-            onClick={(e) => {
-              e.stopPropagation()
-              handleZoneClick('next')
-            }}
-          />
-          <div
-            className="pdf-click-zone top"
-            aria-hidden
-            onPointerDown={suppressZonePointer}
-            onMouseDown={suppressZonePointer}
-            onClick={(e) => {
-              e.stopPropagation()
-              handleZoneClick('prev')
-            }}
-          />
-          <div
-            className="pdf-click-zone bottom"
-            aria-hidden
-            onPointerDown={suppressZonePointer}
-            onMouseDown={suppressZonePointer}
-            onClick={(e) => {
-              e.stopPropagation()
-              handleZoneClick('next')
-            }}
-          />
+          {/* 放大可拖时卸掉中部翻页层与左右热区，否则会挡住视口滚动 */}
+          {isCompact && !midSelectMode && !selection && !loading && !canPan && (
+            <ReaderMidSwipeLayer
+              onPrev={goPrev}
+              onNext={goNext}
+              onTap={() => {
+                if (suppressChromeToggleRef.current) {
+                  suppressChromeToggleRef.current = false
+                  return
+                }
+                // 双击候选窗口内延迟切栏，避免「双击复位」先被第一次轻点误切顶/底栏
+                const armed = lastContentTapRef.current
+                if (armed.t > 0 && Date.now() - armed.t < 420) {
+                  const stamp = armed.t
+                  window.setTimeout(() => {
+                    if (suppressChromeToggleRef.current) {
+                      suppressChromeToggleRef.current = false
+                      return
+                    }
+                    if (lastContentTapRef.current.t !== stamp) return
+                    setChromeVisible((v) => !v)
+                  }, 300)
+                  return
+                }
+                setChromeVisible((v) => !v)
+              }}
+              onLongPressSelect={() => enterAnnotateMode({ pinned: false })}
+            />
+          )}
 
-          {selection && (
+          {/* 放大可拖时仍保留左右窄热区翻页；中部层已卸，不挡拖动画布 */}
+          {!(isCompact && selection) && (
+            <>
+              <div
+                className={`pdf-click-zone left${isCompact ? ' pdf-click-zone-compact' : ''}${canPan && isCompact ? ' pdf-click-zone-pannable' : ''}`}
+                aria-hidden
+                onPointerDown={suppressZonePointer}
+                onMouseDown={suppressZonePointer}
+                onClick={(e) => {
+                  e.stopPropagation()
+                  midSelectPinnedRef.current = false
+                  setMidSelectMode(false)
+                  handleZoneClick('prev')
+                }}
+              />
+              <div
+                className={`pdf-click-zone right${isCompact ? ' pdf-click-zone-compact' : ''}${canPan && isCompact ? ' pdf-click-zone-pannable' : ''}`}
+                aria-hidden
+                onPointerDown={suppressZonePointer}
+                onMouseDown={suppressZonePointer}
+                onClick={(e) => {
+                  e.stopPropagation()
+                  midSelectPinnedRef.current = false
+                  setMidSelectMode(false)
+                  handleZoneClick('next')
+                }}
+              />
+            </>
+          )}
+
+          {selection && (!isCompact || selectionChromeEl) && (
             <SelectionBubble
+              variant={isCompact ? 'sheet' : 'bar'}
               anchor={selection.anchor}
               text={selection.text}
               pageValue={basketPage}
@@ -1326,6 +2284,21 @@ export default function PdfReaderPage({ book }: Props) {
               containerWidth={containerRef.current?.clientWidth || 360}
               containerHeight={containerRef.current?.clientHeight || 640}
               interactingRef={bubbleInteractingRef}
+              translate={translateBubble}
+              onTranslate={translateNow}
+              translatePanelOpen={drawerTab === 'translate'}
+              onToggleTranslatePanel={() => {
+                if (drawerTab === 'translate') {
+                  setDrawerTab(null)
+                  return
+                }
+                openPanelFromBubble()
+                setShowPdfSettings(false)
+                setShowJournal(false)
+                setDrawerTab('translate')
+                setChromeVisible(true)
+              }}
+              portalRoot={isCompact ? selectionChromeEl : shellRef.current}
             />
           )}
 
@@ -1371,6 +2344,18 @@ export default function PdfReaderPage({ book }: Props) {
           />
         )}
 
+        {drawerTab === 'translate' && (
+          <div className="reader-drawer">
+            <div className="reader-drawer-header">
+              <div style={{ fontWeight: 700 }}>划词翻译</div>
+              <button className="icon-btn" onClick={() => setDrawerTab(null)}>
+                <X size={16} />
+              </button>
+            </div>
+            <ReaderTranslatePanel entry={translatePanel} onExplain={askExplain} />
+          </div>
+        )}
+
         {drawerTab === 'notes' && (
           <div className="reader-drawer">
             <div className="reader-drawer-header">
@@ -1410,12 +2395,12 @@ export default function PdfReaderPage({ book }: Props) {
       </div>
 
       <motion.div
-        className="reader-bottombar"
+        className={`reader-bottombar${isCompact && selection ? ' is-selecting' : ''}`}
         onMouseDown={(e) => e.stopPropagation()}
         initial={false}
-        animate={chromeVisible ? { y: 0, opacity: 1 } : { y: '105%', opacity: 0 }}
+        animate={chromeShown ? { y: 0, opacity: 1 } : { y: '105%', opacity: 0 }}
         transition={reduceMotion ? { duration: 0 } : chromeSpring}
-        style={{ pointerEvents: chromeVisible ? 'auto' : 'none' }}
+        style={{ pointerEvents: chromeShown ? 'auto' : 'none' }}
       >
         <input
           className="reader-scrubber"
@@ -1445,6 +2430,7 @@ export default function PdfReaderPage({ book }: Props) {
             <ChevronRight size={18} />
           </button>
         </div>
+        <div ref={setSelectionChromeEl} className="reader-bottombar-selection" />
       </motion.div>
     </motion.div>
   )

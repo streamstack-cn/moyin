@@ -9,8 +9,10 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from database import get_db
-from models import User
-from security import create_access_token, get_current_user, verify_password
+from models import Book, User
+from security import create_access_token, get_current_user, hash_password, verify_password
+import storage
+from serializers import cover_url_for
 from services import redis_client
 
 router = APIRouter(prefix="/api/auth", tags=["Auth"])
@@ -71,6 +73,7 @@ def _load_preferences(user: User) -> dict:
 class LoginPayload(BaseModel):
     username: str
     password: str
+    remember_me: bool = True
 
 
 @router.post("/login")
@@ -88,9 +91,11 @@ def login(payload: LoginPayload, request: Request, db: Session = Depends(get_db)
     _clear_login_failures(payload.username, client_ip)
     user.last_login_at = datetime.utcnow()
     db.commit()
-    token = create_access_token(user)
+    remember = bool(payload.remember_me)
+    token = create_access_token(user, remember_me=remember)
     return {
         "token": token,
+        "remember_me": remember,
         "user": {
             "id": user.id,
             "username": user.username,
@@ -112,6 +117,30 @@ def me(user: User = Depends(get_current_user)):
     }
 
 
+@router.get("/login-covers")
+def login_covers(db: Session = Depends(get_db), limit: int = 60):
+    """登录页封面墙：无需登录。优先高分有封面书籍，供动态背景使用。"""
+    take = max(12, min(int(limit or 60), 96))
+    rows = (
+        db.query(Book)
+        .filter(Book.cover_path.isnot(None), Book.cover_path != "")
+        .order_by(Book.rating.desc(), Book.updated_at.desc())
+        .limit(take * 2)
+        .all()
+    )
+    covers: list[str] = []
+    for book in rows:
+        path = storage.resolve_stored_path(book.cover_path)
+        if not path or not path.is_file():
+            continue
+        url = cover_url_for(book)
+        if url:
+            covers.append(url)
+        if len(covers) >= take:
+            break
+    return {"covers": covers}
+
+
 @router.get("/me/preferences")
 def get_preferences(user: User = Depends(get_current_user)):
     return _load_preferences(user)
@@ -125,3 +154,27 @@ def update_preferences(payload: dict[str, Any], db: Session = Depends(get_db), u
     user.preferences = json.dumps(current, ensure_ascii=False)
     db.commit()
     return current
+
+
+class ChangePasswordPayload(BaseModel):
+    current_password: str
+    new_password: str
+
+
+@router.post("/me/password")
+def change_password(
+    payload: ChangePasswordPayload,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """当前登录用户修改自己的密码（管理员与普通读者均可）。"""
+    if not verify_password(payload.current_password or "", user.password_hash):
+        raise HTTPException(status_code=400, detail="当前密码不正确")
+    new_pw = (payload.new_password or "").strip()
+    if len(new_pw) < 6:
+        raise HTTPException(status_code=400, detail="新密码至少 6 位")
+    if verify_password(new_pw, user.password_hash):
+        raise HTTPException(status_code=400, detail="新密码不能与当前密码相同")
+    user.password_hash = hash_password(new_pw)
+    db.commit()
+    return {"success": True}

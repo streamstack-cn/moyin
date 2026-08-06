@@ -685,7 +685,10 @@ async def get_readable_books(
 ):
     """获取用户已读/在读书目，用于 AI 伴读选书。"""
     from models import ReadingProgress
-    # 获取有阅读进度（在读/已读）的书
+    from services import progress_service
+
+    progress_service.heal_finished_progress(db, user.id)
+    # 获取有阅读进度（在读/已读）的书；未满 3% 不算在读
     progresses = (
         db.query(ReadingProgress)
         .filter(ReadingProgress.user_id == user.id)
@@ -693,11 +696,9 @@ async def get_readable_books(
     )
     book_status: dict[str, str] = {}
     for p in progresses:
-        percent = p.percent or 0
-        if percent >= 0.95:
-            book_status[p.book_id] = "finished"
-        elif percent > 0:
-            book_status[p.book_id] = "reading"
+        st = progress_service.status_from_percent(p.percent, stored_status=p.status)
+        if st in ("reading", "finished"):
+            book_status[p.book_id] = st
 
     # 结合高亮、引用等标记状态
     query = db.query(Book)

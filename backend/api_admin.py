@@ -6,11 +6,12 @@ api_admin.py — 管理员后台：用户管理、系统状态、阅读统计仪
 
 import os
 import shutil
+import tempfile
 import uuid
 from datetime import datetime
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
@@ -19,11 +20,13 @@ import storage
 from database import DATABASE_URL, DATA_DIR, IS_SQLITE, get_db
 from models import AppConfig, Book, CitationBasketItem, CitationProject, Highlight, ReadingProgress, User, UserFavorite
 from security import get_current_user, hash_password, require_admin
+from services import backup_service
 
 router = APIRouter(prefix="/api/admin", tags=["Admin"])
 settings_router = APIRouter(prefix="/api/settings", tags=["Settings"])
 
 READER_WHEEL_KEY = "READER_WHEEL_PAGE_TURN"
+LOGIN_COVER_FLOW_KEY = "LOGIN_COVER_FLOW"
 GOOGLE_BOOKS_API_KEY = "GOOGLE_BOOKS_API_KEY"
 
 
@@ -239,6 +242,7 @@ def reading_stats(db: Session = Depends(get_db), user: User = Depends(get_curren
         .filter(
             ReadingProgress.user_id == user.id,
             ReadingProgress.status == "reading",
+            ReadingProgress.percent >= progress_service.READING_MIN_PERCENT,
             ReadingProgress.percent < progress_service.FINISHED_THRESHOLD,
         )
         .count()
@@ -302,6 +306,28 @@ def put_reader_settings(
     _set_config(db, READER_WHEEL_KEY, "true" if payload.wheel_page_turn else "false")
     db.commit()
     return {"success": True, "wheel_page_turn": payload.wheel_page_turn}
+
+
+# ── 登录页全局设置（封面动态默认开；仅管理员可改） ─────────────────────
+@settings_router.get("/login")
+def get_login_settings(db: Session = Depends(get_db)):
+    """公开接口：登录页需在未登录时读取封面动态开关，默认开启。"""
+    return {"login_cover_flow": _get_config_bool(db, LOGIN_COVER_FLOW_KEY, True)}
+
+
+class LoginSettingsPayload(BaseModel):
+    login_cover_flow: bool
+
+
+@settings_router.put("/login")
+def put_login_settings(
+    payload: LoginSettingsPayload,
+    db: Session = Depends(get_db),
+    admin: User = Depends(require_admin),
+):
+    _set_config(db, LOGIN_COVER_FLOW_KEY, "true" if payload.login_cover_flow else "false")
+    db.commit()
+    return {"success": True, "login_cover_flow": payload.login_cover_flow}
 
 
 # ── Google Books API Key ────────────────────────────────────────────────
@@ -395,14 +421,105 @@ def put_library_scan_settings(
     }
 
 
-# ── 备份导出 ────────────────────────────────────────────────────────────
+# ── 备份导出 / 恢复 ────────────────────────────────────────────────────
 @router.get("/backup")
-def export_backup(admin: User = Depends(require_admin)):
-    """打包数据库文件 + 配置目录，供迁移/备份使用（仅 SQLite 模式下含数据库文件）"""
-    archive_base = str(storage.EXPORTS_DIR / f"moyin_backup_{uuid.uuid4().hex}")
-    shutil.make_archive(archive_base, "zip", root_dir=str(DATA_DIR))
+def export_backup_legacy(admin: User = Depends(require_admin)):
+    """兼容旧链接：等同于全部数据备份。"""
+    return export_full_backup(admin)
+
+
+@router.get("/backup/config")
+def export_config_backup(db: Session = Depends(get_db), admin: User = Depends(require_admin)):
+    """配置备份：所有用户账号/偏好、AI 配置、系统 AppConfig（不含书籍文件）。"""
+    try:
+        path = backup_service.build_config_backup(db)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"配置备份失败：{exc}") from exc
     return FileResponse(
-        f"{archive_base}.zip",
-        filename=f"moyin_backup_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}.zip",
+        str(path),
+        filename=path.name,
         media_type="application/zip",
     )
+
+
+@router.get("/backup/full")
+def export_full_backup(admin: User = Depends(require_admin)):
+    """全部数据备份：数据库 + 封面/上传/转换文件等。"""
+    try:
+        path = backup_service.build_full_backup()
+    except RuntimeError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"全部数据备份失败：{exc}") from exc
+    return FileResponse(
+        str(path),
+        filename=path.name,
+        media_type="application/zip",
+    )
+
+
+@router.post("/backup/inspect")
+async def inspect_backup(
+    file: UploadFile = File(...),
+    admin: User = Depends(require_admin),
+):
+    """上传 zip 后识别是配置备份还是全部数据备份（不执行恢复）。"""
+    suffix = Path(file.filename or "backup.zip").suffix or ".zip"
+    with tempfile.NamedTemporaryFile(prefix="moyin_inspect_", suffix=suffix, delete=False) as tmp:
+        tmp_path = Path(tmp.name)
+        try:
+            while True:
+                chunk = await file.read(1024 * 1024)
+                if not chunk:
+                    break
+                tmp.write(chunk)
+        finally:
+            await file.close()
+    try:
+        return backup_service.inspect_backup_zip(tmp_path)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    finally:
+        tmp_path.unlink(missing_ok=True)
+
+
+@router.post("/backup/restore")
+async def restore_backup(
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    admin: User = Depends(require_admin),
+):
+    """恢复备份：自动识别配置备份 / 全部数据备份。全部数据恢复会覆盖当前库文件。"""
+    suffix = Path(file.filename or "backup.zip").suffix or ".zip"
+    with tempfile.NamedTemporaryFile(prefix="moyin_restore_", suffix=suffix, delete=False) as tmp:
+        tmp_path = Path(tmp.name)
+        try:
+            while True:
+                chunk = await file.read(1024 * 1024)
+                if not chunk:
+                    break
+                tmp.write(chunk)
+        finally:
+            await file.close()
+    try:
+        info = backup_service.inspect_backup_zip(tmp_path)
+        if info["type"] == "config":
+            result = backup_service.restore_config_backup(db, tmp_path)
+        else:
+            # 全部数据恢复会 dispose 连接池，先释放当前会话
+            db.close()
+            result = backup_service.restore_full_backup(tmp_path)
+        return {
+            "success": True,
+            "detected_type": info.get("type"),
+            "detected_label": info.get("type_label"),
+            **result,
+        }
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"恢复失败：{exc}") from exc
+    finally:
+        tmp_path.unlink(missing_ok=True)

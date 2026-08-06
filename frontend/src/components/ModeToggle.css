@@ -1,0 +1,315 @@
+/* 基准尺寸 60×34（与 uiverse / streamstack 原设计一致）。
+   紧凑场景用 scale，避免逐像素改尺寸导致日月/白云/星星比例错乱。 */
+.mode-toggle {
+  --mt-w: 60px;
+  --mt-h: 34px;
+  --mt-knob: 26px;
+  --mt-pad: 4px;
+  --mt-travel: 26px;
+  position: relative;
+  display: inline-block;
+  width: var(--mt-w);
+  height: var(--mt-h);
+  border: 1px solid var(--border, rgba(255, 255, 255, 0.12));
+  border-radius: 999px;
+  box-sizing: border-box;
+  flex-shrink: 0;
+  cursor: pointer;
+  transform-origin: center center;
+}
+
+.mode-toggle.mode-toggle-compact {
+  /* 视觉约 48×28，内部元素按原比例缩放 */
+  transform: scale(0.8);
+  margin-inline: -6px;
+}
+
+/* 装饰层不抢点击，保证点到 label → checkbox onChange */
+.mode-toggle .slider,
+.mode-toggle .sun-moon,
+.mode-toggle .stars,
+.mode-toggle .clouds,
+.mode-toggle svg {
+  pointer-events: none;
+}
+
+.mode-toggle .mode-toggle-input {
+  opacity: 0;
+  width: 0;
+  height: 0;
+  position: absolute;
+  margin: 0;
+}
+
+.mode-toggle .slider {
+  position: absolute;
+  cursor: pointer;
+  inset: 0;
+  background-color: #2196f3;
+  transition: background-color 0.4s;
+  z-index: 0;
+  overflow: hidden;
+}
+
+.mode-toggle .sun-moon {
+  position: absolute;
+  height: var(--mt-knob);
+  width: var(--mt-knob);
+  left: var(--mt-pad);
+  bottom: 3px;
+  background-color: #ffd93b;
+  transition:
+    transform 0.4s cubic-bezier(0.4, 0, 0.2, 1),
+    background-color 0.4s;
+  transform: translateX(0) rotate(0);
+  z-index: 2;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.18);
+}
+
+.mode-toggle .mode-toggle-input:checked + .slider {
+  background-color: #111;
+}
+
+.mode-toggle .mode-toggle-input:focus-visible + .slider {
+  box-shadow: 0 0 0 2px var(--accent-soft-strong, rgba(96, 165, 250, 0.45));
+}
+
+.mode-toggle .mode-toggle-input:checked + .slider .sun-moon {
+  transform: translateX(var(--mt-travel)) rotate(360deg);
+  background-color: #f5f5f7;
+}
+
+.mode-toggle .moon-dot {
+  opacity: 0;
+  transition: opacity 0.4s;
+  fill: #8e8e93;
+}
+
+.mode-toggle .mode-toggle-input:checked + .slider .sun-moon .moon-dot {
+  opacity: 1;
+}
+
+.mode-toggle .slider.round {
+  border-radius: 999px;
+}
+
+.mode-toggle .slider.round .sun-moon {
+  border-radius: 50%;
+}
+
+.mode-toggle .moon-dot-1 {
+  left: 10px;
+  top: 3px;
+  position: absolute;
+  width: 6px;
+  height: 6px;
+  z-index: 4;
+}
+
+.mode-toggle .moon-dot-2 {
+  left: 2px;
+  top: 10px;
+  position: absolute;
+  width: 10px;
+  height: 10px;
+  z-index: 4;
+}
+
+.mode-toggle .moon-dot-3 {
+  left: 16px;
+  top: 18px;
+  position: absolute;
+  width: 3px;
+  height: 3px;
+  z-index: 4;
+}
+
+.mode-toggle .light-ray {
+  position: absolute;
+  z-index: -1;
+  fill: #fff;
+  opacity: 0.12;
+}
+
+.mode-toggle .light-ray-1 {
+  left: -8px;
+  top: -8px;
+  width: 43px;
+  height: 43px;
+}
+
+.mode-toggle .light-ray-2 {
+  left: -50%;
+  top: -50%;
+  width: 55px;
+  height: 55px;
+}
+
+.mode-toggle .light-ray-3 {
+  left: -18px;
+  top: -18px;
+  width: 60px;
+  height: 60px;
+}
+
+/* 浅色态白云：原设计路径坐标系大于 24 viewBox，需放大视口才能看见 */
+.mode-toggle .clouds {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  opacity: 1;
+  transition: opacity 0.35s ease, transform 0.35s ease;
+}
+
+.mode-toggle .mode-toggle-input:checked + .slider .clouds {
+  opacity: 0;
+  transform: translateY(10px);
+}
+
+.mode-toggle .cloud-light {
+  position: absolute;
+  fill: #ffffff;
+  opacity: 1;
+  animation: mode-toggle-cloud-move 6s infinite;
+  filter: drop-shadow(0 1px 2px rgba(0, 60, 120, 0.18));
+}
+
+.mode-toggle .cloud-dark {
+  position: absolute;
+  fill: #dce9f8;
+  opacity: 0.92;
+  animation: mode-toggle-cloud-move 6s infinite 1s;
+}
+
+/* 云朵在轨道右半、垂直居中偏下（原设计层次） */
+.mode-toggle .cloud-1 {
+  left: 24px;
+  top: 12px;
+  width: 40px;
+  height: 22px;
+}
+
+.mode-toggle .cloud-2 {
+  left: 40px;
+  top: 6px;
+  width: 26px;
+  height: 16px;
+}
+
+.mode-toggle .cloud-3 {
+  left: 18px;
+  top: 18px;
+  width: 30px;
+  height: 18px;
+}
+
+.mode-toggle .cloud-4 {
+  left: 30px;
+  top: 14px;
+  width: 36px;
+  height: 20px;
+}
+
+.mode-toggle .cloud-5 {
+  left: 46px;
+  top: 8px;
+  width: 22px;
+  height: 14px;
+}
+
+.mode-toggle .cloud-6 {
+  left: 22px;
+  top: 20px;
+  width: 28px;
+  height: 16px;
+}
+
+@keyframes mode-toggle-cloud-move {
+  0% {
+    transform: translateX(0);
+  }
+  40% {
+    transform: translateX(3px);
+  }
+  80% {
+    transform: translateX(-3px);
+  }
+  100% {
+    transform: translateX(0);
+  }
+}
+
+.mode-toggle .stars {
+  transform: translateY(-32px);
+  opacity: 0;
+  transition: transform 0.4s, opacity 0.4s;
+  z-index: 1;
+}
+
+.mode-toggle .star {
+  fill: #fff;
+  position: absolute;
+  transition: opacity 0.4s;
+  animation: mode-toggle-star-twinkle 2s infinite;
+}
+
+.mode-toggle .mode-toggle-input:checked + .slider .stars {
+  transform: translateY(0);
+  opacity: 1;
+}
+
+.mode-toggle .star-1 {
+  width: 20px;
+  top: 2px;
+  left: 3px;
+  animation-delay: 0.3s;
+}
+
+.mode-toggle .star-2 {
+  width: 6px;
+  top: 16px;
+  left: 3px;
+}
+
+.mode-toggle .star-3 {
+  width: 12px;
+  top: 20px;
+  left: 10px;
+  animation-delay: 0.6s;
+}
+
+.mode-toggle .star-4 {
+  width: 18px;
+  top: 0;
+  left: 18px;
+  animation-delay: 1.3s;
+}
+
+@keyframes mode-toggle-star-twinkle {
+  0% {
+    transform: scale(1);
+  }
+  40% {
+    transform: scale(1.2);
+  }
+  80% {
+    transform: scale(0.8);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+
+body.no-advanced-anim .mode-toggle .cloud-light,
+body.no-advanced-anim .mode-toggle .cloud-dark,
+body.no-advanced-anim .mode-toggle .star {
+  animation: none !important;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .mode-toggle .cloud-light,
+  .mode-toggle .cloud-dark,
+  .mode-toggle .star {
+    animation: none !important;
+  }
+}

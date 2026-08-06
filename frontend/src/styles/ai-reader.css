@@ -705,16 +705,26 @@
     flex-basis: 100%;
   }
 
+  .ai-report-head-title-text {
+    white-space: normal;
+  }
+
+  .ai-report-head-time {
+    white-space: normal;
+  }
+
   .ai-report-head-actions {
     flex-basis: 100%;
   }
 
   .ai-report-head-actions .page-seg {
     width: 100%;
+    flex-wrap: wrap;
   }
 
   .ai-report-head-actions .page-seg-item {
-    flex: 1;
+    flex: 1 1 auto;
+    min-width: 0;
   }
 }
 
@@ -784,6 +794,48 @@
   line-height: 1.6;
 }
 
+.ai-generating-phases {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 8px 14px;
+  font-size: 12px;
+  color: var(--ink-faint);
+}
+
+.ai-generating-phase {
+  opacity: 0.45;
+}
+
+.ai-generating-phase.is-done {
+  opacity: 0.7;
+  text-decoration: line-through;
+  text-decoration-color: color-mix(in srgb, var(--ink-faint) 50%, transparent);
+}
+
+.ai-generating-phase.is-active {
+  opacity: 1;
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.ai-gen-interrupt {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  text-align: center;
+  padding: 28px 20px;
+}
+
+.ai-gen-interrupt-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  justify-content: center;
+  margin-top: 4px;
+}
+
 .ai-report-section {
   padding: 20px;
   border-radius: var(--radius-lg);
@@ -812,6 +864,310 @@
   white-space: pre-wrap;
 }
 
+/* ── 阅读报告：私读手记 folio 排版 ─────────────────────────────────────── */
+.ai-report-folio {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+.ai-report-folio-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  border: 1px solid var(--border);
+  border-radius: calc(var(--radius-lg) + 2px);
+  overflow: hidden;
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--bg-2) 88%, var(--accent) 4%), var(--bg-1));
+  box-shadow: 0 1px 0 color-mix(in srgb, var(--ink) 4%, transparent) inset;
+}
+
+.ai-report-block {
+  position: relative;
+  padding: 22px 22px 24px;
+  border-bottom: 1px solid var(--border);
+}
+
+.ai-report-block:last-child {
+  border-bottom: none;
+}
+
+.ai-report-block.is-lead {
+  padding-top: 26px;
+  background:
+    radial-gradient(120% 80% at 0% 0%, color-mix(in srgb, var(--accent) 10%, transparent), transparent 55%);
+}
+
+.ai-report-block-head {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
+.ai-report-block-kicker {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+}
+
+.ai-report-block-index {
+  font-family: var(--font-sans);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  color: var(--accent);
+  font-variant-numeric: tabular-nums;
+}
+
+.ai-report-block-kicker-en {
+  font-size: 11px;
+  letter-spacing: 0.12em;
+  color: var(--ink-faint);
+  font-weight: 500;
+  font-family: var(--font-serif);
+}
+
+.ai-report-block-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  font-family: var(--font-serif);
+  font-size: 17px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: var(--ink);
+  line-height: 1.3;
+}
+
+.ai-report-block-icon {
+  display: inline-flex;
+  color: var(--accent);
+  opacity: 0.9;
+}
+
+.ai-report-block-icon svg {
+  width: 15px;
+  height: 15px;
+}
+
+.ai-report-section-body.is-lede,
+.ai-report-section-body.is-quote,
+.ai-report-section-body.is-prose,
+.ai-report-section-body.is-insights,
+.ai-report-section-body.is-advice {
+  white-space: normal;
+}
+
+.ai-report-lede {
+  font-family: var(--font-serif);
+  font-size: 15px;
+  line-height: 1.95;
+  color: var(--ink);
+  width: 100%;
+  max-width: none;
+}
+
+.ai-report-lede p {
+  margin: 0 0 0.9em;
+}
+
+.ai-report-lede p:last-child {
+  margin-bottom: 0;
+}
+
+.ai-report-prose-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 0.85em;
+  width: 100%;
+  max-width: none;
+}
+
+.ai-report-prose {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.9;
+  color: var(--ink-dim);
+  font-family: var(--font-serif);
+}
+
+.ai-report-pullquote {
+  position: relative;
+  margin: 4px 0 0;
+  padding: 8px 0 4px 18px;
+  border-left: 2px solid color-mix(in srgb, var(--accent) 55%, transparent);
+  width: 100%;
+  max-width: none;
+  box-sizing: border-box;
+}
+
+.ai-report-pullquote-mark {
+  position: absolute;
+  top: -10px;
+  left: 10px;
+  font-family: var(--font-serif);
+  font-size: 42px;
+  line-height: 1;
+  color: color-mix(in srgb, var(--accent) 35%, transparent);
+  pointer-events: none;
+  user-select: none;
+}
+
+.ai-report-pullquote-body {
+  position: relative;
+  font-family: var(--font-serif);
+  font-size: 14.5px;
+  line-height: 1.95;
+  color: var(--ink);
+  font-style: normal;
+}
+
+.ai-report-pullquote-body p {
+  margin: 0 0 0.75em;
+}
+
+.ai-report-pullquote-body p:last-child {
+  margin-bottom: 0;
+}
+
+.ai-insight-list {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.ai-insight-card {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 14px 16px;
+  padding: 16px 16px 14px;
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--bg-0) 55%, transparent);
+  border: 1px solid var(--border);
+}
+
+.ai-insight-index {
+  font-family: var(--font-serif);
+  font-size: 22px;
+  font-weight: 600;
+  line-height: 1;
+  color: color-mix(in srgb, var(--accent) 70%, var(--ink-faint));
+  letter-spacing: 0.02em;
+  padding-top: 2px;
+  min-width: 1.6em;
+}
+
+.ai-insight-fields {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+}
+
+.ai-insight-field-label {
+  display: block;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  text-transform: none;
+  color: var(--ink-faint);
+  margin-bottom: 4px;
+}
+
+.ai-insight-field-text {
+  margin: 0;
+  font-size: 13.5px;
+  line-height: 1.85;
+  color: var(--ink-dim);
+  font-family: var(--font-serif);
+}
+
+.ai-insight-field:first-child .ai-insight-field-text {
+  color: var(--ink);
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.ai-report-advice-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  width: 100%;
+  max-width: none;
+}
+
+.ai-report-advice-list li {
+  position: relative;
+  padding: 10px 12px 10px 28px;
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--bg-0) 40%, transparent);
+  border: 1px solid var(--border);
+  font-family: var(--font-serif);
+  font-size: 13.5px;
+  line-height: 1.75;
+  color: var(--ink-dim);
+}
+
+.ai-report-advice-list li::before {
+  content: '';
+  position: absolute;
+  left: 12px;
+  top: 1.05em;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+  opacity: 0.85;
+}
+
+@media (max-width: 720px) {
+  .ai-report-block {
+    padding: 18px 16px 20px;
+  }
+
+  .ai-insight-card {
+    grid-template-columns: 1fr;
+    gap: 8px;
+  }
+
+  .ai-insight-index {
+    font-size: 18px;
+  }
+
+  .ai-report-lede {
+    font-size: 14.5px;
+  }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .ai-report-block {
+    animation: ai-report-block-in 420ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  }
+
+  .ai-report-block:nth-child(1) { animation-delay: 40ms; }
+  .ai-report-block:nth-child(2) { animation-delay: 90ms; }
+  .ai-report-block:nth-child(3) { animation-delay: 140ms; }
+  .ai-report-block:nth-child(4) { animation-delay: 190ms; }
+  .ai-report-block:nth-child(5) { animation-delay: 240ms; }
+}
+
+@keyframes ai-report-block-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
 .ai-report-textarea {
   width: 100%;
   min-height: 120px;
@@ -830,9 +1186,6 @@
   display: flex;
   justify-content: flex-end;
   gap: 8px;
-  /* 之前这里是负 margin，把按钮往下拉到紧贴（甚至嵌进）下面卡片的圆角边框上，
-     两者的圆角完全对不上，看起来像按钮"糊"在卡片边缘一样别扭。改成正常的
-     正向间距，让按钮和卡片之间有干净的呼吸空间。 */
   margin-bottom: 12px;
 }
 
@@ -846,9 +1199,15 @@
   top: -38px;
 }
 
-/* ── AI 伴读：追问对话 ──────────────────────────────────────────────────── */
+.ai-report-raw-wrap .ai-report-section {
+  font-family: var(--font-serif);
+  line-height: 1.95;
+  padding: 22px;
+}
+
+/* ── AI 伴读：追问对话（置于报告上方）──────────────────────────────────── */
 .ai-chat-panel {
-  margin-top: 18px;
+  margin: 0 0 16px;
   padding: 16px 18px;
   border-radius: var(--radius-lg);
 }

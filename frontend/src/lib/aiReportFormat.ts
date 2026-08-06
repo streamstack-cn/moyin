@@ -48,6 +48,13 @@ export const REPORT_FIELD_LABELS: Record<string, string> = {
 /** 核心收获条目内字段的优先展示顺序 */
 export const INSIGHT_FIELD_ORDER = ['要点', '论证', '我的思考', '洞察', '反思', '结论', '建议']
 
+export type ReportSectionKind = 'lede' | 'insights' | 'quote' | 'prose' | 'advice'
+
+export type ReportDisplayBlock =
+  | { type: 'paragraph'; text: string }
+  | { type: 'insight'; index: number; fields: { label: string; text: string }[] }
+  | { type: 'bullet'; text: string }
+
 export function labelReportField(key: string): string {
   return REPORT_FIELD_LABELS[key] || REPORT_FIELD_LABELS[key.toLowerCase()] || key
 }
@@ -70,7 +77,6 @@ export function renderReportObject(obj: Record<string, unknown>): string {
   for (const prefer of INSIGHT_FIELD_ORDER) {
     if (keys.includes(prefer)) ordered.push(prefer)
   }
-  // 英文 key 按中文标签归并到优先序
   for (const prefer of INSIGHT_FIELD_ORDER) {
     for (const k of keys) {
       if (ordered.includes(k)) continue
@@ -107,4 +113,136 @@ export function renderReportValue(val: unknown): string {
 /** 将报告字段规范为可展示字符串（编辑态也用展平后的文本，避免对象进 textarea） */
 export function normalizeReportFieldForEdit(val: unknown): string {
   return renderReportValue(val)
+}
+
+export function sectionKindForKey(key: string): ReportSectionKind {
+  switch (key) {
+    case 'content_summary':
+      return 'lede'
+    case 'core_insights':
+      return 'insights'
+    case 'personal_reflections':
+      return 'quote'
+    case 'reading_advice':
+      return 'advice'
+    default:
+      return 'prose'
+  }
+}
+
+function orderedObjectFields(obj: Record<string, unknown>): { label: string; text: string }[] {
+  const keys = Object.keys(obj)
+  const ordered: string[] = []
+  for (const prefer of INSIGHT_FIELD_ORDER) {
+    if (keys.includes(prefer)) ordered.push(prefer)
+  }
+  for (const prefer of INSIGHT_FIELD_ORDER) {
+    for (const k of keys) {
+      if (ordered.includes(k)) continue
+      if (labelReportField(k) === prefer) ordered.push(k)
+    }
+  }
+  for (const k of keys) {
+    if (!ordered.includes(k)) ordered.push(k)
+  }
+  return ordered
+    .map((k) => ({
+      label: labelReportField(k),
+      text: sanitizeReportText(String(renderReportValue(obj[k]) || '')).trim(),
+    }))
+    .filter((f) => f.text)
+}
+
+/** 从展平文本里拆「（1）/1. /要点：」结构，便于历史纯文本报告也走高级排版 */
+export function parseLabeledInsightText(text: string): ReportDisplayBlock[] {
+  const cleaned = sanitizeReportText(text).trim()
+  if (!cleaned) return []
+
+  const chunks = cleaned
+    .split(/(?=（\d+）|\n(?=\d+[\.、]\s)|(?=^\d+[\.、]\s))/m)
+    .map((c) => c.trim())
+    .filter(Boolean)
+
+  const insightLike = chunks.filter((c) => /要点[：:]|论证[：:]|我的思考[：:]/.test(c) || /^（\d+）/.test(c))
+  if (insightLike.length >= 1 && (chunks.length > 1 || /^（\d+）/.test(cleaned))) {
+    return insightLike.map((chunk, i) => {
+      const body = chunk.replace(/^（\d+）\s*/, '').replace(/^\d+[\.、]\s*/, '').trim()
+      const fields: { label: string; text: string }[] = []
+      const fieldRe = /(要点|论证|我的思考|洞察|反思|结论|建议|行动建议)[：:]\s*/g
+      const parts = body.split(fieldRe)
+      if (parts.length >= 3) {
+        for (let p = 1; p < parts.length; p += 2) {
+          const label = parts[p]
+          const fieldText = (parts[p + 1] || '').trim()
+          if (label && fieldText) fields.push({ label, text: fieldText })
+        }
+      }
+      if (!fields.length && body) fields.push({ label: '要点', text: body })
+      return { type: 'insight' as const, index: i + 1, fields }
+    })
+  }
+
+  return cleaned
+    .split(/\n{2,}/)
+    .map((t) => t.trim())
+    .filter(Boolean)
+    .map((t) => ({ type: 'paragraph' as const, text: t }))
+}
+
+/**
+ * 把任意报告字段值解析为结构化展示块（不改变存库格式）。
+ */
+export function parseReportDisplayBlocks(val: unknown, kind: ReportSectionKind = 'prose'): ReportDisplayBlock[] {
+  if (val == null) return []
+
+  if (Array.isArray(val)) {
+    const insights: ReportDisplayBlock[] = []
+    const paragraphs: ReportDisplayBlock[] = []
+    val.forEach((item) => {
+      if (item && typeof item === 'object' && !Array.isArray(item)) {
+        const fields = orderedObjectFields(item as Record<string, unknown>)
+        if (fields.length) insights.push({ type: 'insight', index: insights.length + 1, fields })
+        return
+      }
+      const text = sanitizeReportText(String(item ?? '')).trim()
+      if (!text) return
+      paragraphs.push({ type: kind === 'advice' ? 'bullet' : 'paragraph', text })
+    })
+    if (insights.length) return insights
+    return paragraphs
+  }
+
+  if (typeof val === 'object') {
+    const fields = orderedObjectFields(val as Record<string, unknown>)
+    if (kind === 'insights' || fields.some((f) => INSIGHT_FIELD_ORDER.includes(f.label))) {
+      return [{ type: 'insight', index: 1, fields }]
+    }
+    return fields.map((f) => ({
+      type: 'paragraph' as const,
+      text: f.label === '内容' || f.label === '总结' ? f.text : `${f.label}：${f.text}`,
+    }))
+  }
+
+  const text = sanitizeReportText(String(val)).trim()
+  if (!text) return []
+
+  if (kind === 'insights') return parseLabeledInsightText(text)
+
+  if (kind === 'advice') {
+    const lines = text
+      .split(/\n+/)
+      .map((l) => l.replace(/^[\s·•\-\d.、）\)]+/, '').trim())
+      .filter(Boolean)
+    if (lines.length > 1) return lines.map((t) => ({ type: 'bullet' as const, text: t }))
+  }
+
+  if (kind === 'lede' || kind === 'quote' || kind === 'prose') {
+    return text
+      .split(/\n{2,}/)
+      .map((t) => t.trim())
+      .filter(Boolean)
+      .map((t) => ({ type: 'paragraph' as const, text: t }))
+  }
+
+  return [{ type: 'paragraph', text }]
 }

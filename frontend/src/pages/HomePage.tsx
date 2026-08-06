@@ -317,6 +317,13 @@ export default function HomePage() {
         <div className="home-topbar-trailing">
           <PageSeg aria-label="快捷入口">
             <PageSegItem
+              icon={<BookOpen size={15} />}
+              label="继续阅读"
+              shortLabel="在读"
+              onClick={() => navigate('/library?status=reading')}
+              title="打开书库并筛选在读书籍"
+            />
+            <PageSegItem
               primary
               icon={<Layers size={15} />}
               label="进入书库"

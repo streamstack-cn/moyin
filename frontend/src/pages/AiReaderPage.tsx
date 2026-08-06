@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import {
   Settings, BookOpen, PenLine, FileText, Bot, Zap, Quote, BrainCircuit, Lightbulb, History, Save, X, RotateCcw, MessageSquare, Sparkles, ChevronDown, ChevronRight, Loader2, Eye, EyeOff, CheckCircle2, Plus, Square,
@@ -15,7 +15,19 @@ import Modal from '../components/Modal'
 import ConfirmDialog from '../components/ConfirmDialog'
 import LabSwitch from '../components/LabSwitch'
 import { PageSeg, PageSegItem } from '../components/PageSeg'
+import { AiReportSectionBody } from '../components/AiReportSectionBody'
 import { renderReportValue } from '../lib/aiReportFormat'
+import {
+  clearAiGenerateSession,
+  getAiGenerateSession,
+  phaseLabel,
+  retryAiGenerateSession,
+  sameBookIds,
+  startAiGenerateSession,
+  stopAiGenerateSession,
+  subscribeAiGenerateSession,
+  type AiGeneratePhase,
+} from '../lib/aiGenerateSession'
 
 // ── 工具 ──────────────────────────────────────────────────────────────────────
 const BASE_URL = import.meta.env.VITE_API_BASE_URL || ''
@@ -265,8 +277,14 @@ function MaterialPanel({
  * 干净的加载动画 + 阶段性文案，字数仍在悄悄增长但只用于内部换算「进度」，
  * 不直接展示原文。
  */
-function StreamingText({ chars }: { chars: number }) {
-  const stage = chars < 400 ? '正在梳理素材与高亮…' : chars < 1200 ? '正在提炼核心观点…' : '正在组织报告结构…'
+function StreamingText({ chars, phase }: { chars: number; phase: AiGeneratePhase }) {
+  const stage = phaseLabel(phase, chars)
+  const steps: { key: AiGeneratePhase; label: string }[] = [
+    { key: 'collecting', label: '收集素材' },
+    { key: 'model', label: '模型输出' },
+    { key: 'saving', label: '整理入库' },
+  ]
+  const activeIdx = phase === 'saving' ? 2 : phase === 'model' ? 1 : 0
   return (
     <div className="ai-generating-anim">
       <div className="ai-generating-orb">
@@ -275,7 +293,49 @@ function StreamingText({ chars }: { chars: number }) {
         <span />
       </div>
       <div className="ai-generating-text">{stage}</div>
-      <div className="ai-generating-hint">篇幅较长或选中全文分析时可能需要一点时间，可随时点击「停止生成」</div>
+      <div className="ai-generating-phases" aria-label="生成阶段">
+        {steps.map((s, i) => (
+          <span
+            key={String(s.key)}
+            className={`ai-generating-phase${i === activeIdx ? ' is-active' : ''}${i < activeIdx ? ' is-done' : ''}`}
+          >
+            {s.label}
+          </span>
+        ))}
+      </div>
+      <div className="ai-generating-hint">
+        {chars > 0 ? `已输出约 ${chars} 字 · ` : ''}
+        篇幅较长或选中全文分析时可能需要一点时间，可随时点击「停止生成」
+      </div>
+    </div>
+  )
+}
+
+function DisconnectOrErrorPanel({
+  title,
+  detail,
+  onRetry,
+  onDismiss,
+}: {
+  title: string
+  detail: string | null
+  onRetry: () => void
+  onDismiss?: () => void
+}) {
+  return (
+    <div className="glass-panel ai-streaming-panel ai-gen-interrupt">
+      <div className="ai-generating-text">{title}</div>
+      {detail && <div className="ai-generating-hint">{detail}</div>}
+      <div className="ai-gen-interrupt-actions">
+        <button type="button" className="btn btn-primary" onClick={onRetry}>
+          <RotateCcw size={14} /> 继续生成
+        </button>
+        {onDismiss && (
+          <button type="button" className="btn btn-ghost" onClick={onDismiss}>
+            关闭
+          </button>
+        )}
+      </div>
     </div>
   )
 }
@@ -285,12 +345,20 @@ function ReportView({
   reportId,
   streaming,
   streamedChars,
+  phase,
+  interrupt,
+  onRetry,
+  onDismissInterrupt,
   onSaved,
 }: {
   report: AiReportContent | null
   reportId: string | null
   streaming: boolean
   streamedChars: number
+  phase: AiGeneratePhase
+  interrupt: { kind: 'disconnected' | 'error'; message: string | null } | null
+  onRetry: () => void
+  onDismissInterrupt?: () => void
   onSaved?: (newReport: AiReportContent) => void
 }) {
   const [isEditing, setIsEditing] = useState(false)
@@ -304,8 +372,19 @@ function ReportView({
   if (streaming) {
     return (
       <div className="glass-panel ai-streaming-panel">
-        <StreamingText chars={streamedChars} />
+        <StreamingText chars={streamedChars} phase={phase} />
       </div>
+    )
+  }
+
+  if (interrupt) {
+    return (
+      <DisconnectOrErrorPanel
+        title={interrupt.kind === 'disconnected' ? '生成已中断' : '生成失败'}
+        detail={interrupt.message}
+        onRetry={onRetry}
+        onDismiss={onDismissInterrupt}
+      />
     )
   }
 
@@ -340,15 +419,22 @@ function ReportView({
   }
 
   const sections = [
-    { key: 'content_summary' as keyof AiReportContent, icon: <BookOpen size={15} />, title: '内容概括' },
-    { key: 'core_insights' as keyof AiReportContent, icon: <Zap size={15} />, title: '核心收获' },
-    { key: 'personal_reflections' as keyof AiReportContent, icon: <Quote size={15} />, title: '个人思考' },
-    { key: 'knowledge_map' as keyof AiReportContent, icon: <BrainCircuit size={15} />, title: '知识关联' },
-    { key: 'reading_advice' as keyof AiReportContent, icon: <Lightbulb size={15} />, title: '阅读建议' },
+    { key: 'content_summary' as keyof AiReportContent, icon: <BookOpen size={15} />, title: '内容概括', kicker: '开篇' },
+    { key: 'core_insights' as keyof AiReportContent, icon: <Zap size={15} />, title: '核心收获', kicker: '收获' },
+    { key: 'personal_reflections' as keyof AiReportContent, icon: <Quote size={15} />, title: '个人思考', kicker: '思索' },
+    { key: 'knowledge_map' as keyof AiReportContent, icon: <BrainCircuit size={15} />, title: '知识关联', kicker: '关联' },
+    { key: 'reading_advice' as keyof AiReportContent, icon: <Lightbulb size={15} />, title: '阅读建议', kicker: '下一步' },
   ]
 
+  const visible = sections.filter((s) => {
+    if (isEditing) return true
+    const raw = editForm[s.key]
+    if (raw == null || raw === '') return false
+    return Boolean(renderReportValue(raw))
+  })
+
   return (
-    <div>
+    <article className="ai-report-folio">
       {!streaming && reportId && (
         <div className="ai-report-actions">
           {isEditing ? (
@@ -368,27 +454,41 @@ function ReportView({
         </div>
       )}
 
-      {sections.map((s) => {
-        const val = renderReportValue(editForm[s.key])
-        if (!val && !isEditing) return null
-        return (
-          <div key={s.key} className="glass-panel ai-report-section">
-            <div className="ai-report-section-head">
-              {s.icon} {s.title}
-            </div>
-            {isEditing ? (
-              <textarea
-                className="ai-report-textarea"
-                value={val || ''}
-                onChange={(e) => setEditForm({ ...editForm, [s.key]: e.target.value })}
-              />
-            ) : (
-              <div className="ai-report-section-body">{val}</div>
-            )}
-          </div>
-        )
-      })}
-    </div>
+      <div className="ai-report-folio-stack">
+        {visible.map((s, idx) => {
+          const raw = editForm[s.key]
+          const flat = renderReportValue(raw)
+          return (
+            <section
+              key={s.key}
+              className={`ai-report-block ai-report-block--${s.key}${idx === 0 ? ' is-lead' : ''}`}
+            >
+              <header className="ai-report-block-head">
+                <div className="ai-report-block-kicker">
+                  <span className="ai-report-block-index">{String(idx + 1).padStart(2, '0')}</span>
+                  <span className="ai-report-block-kicker-en">{s.kicker}</span>
+                </div>
+                <h3 className="ai-report-block-title">
+                  <span className="ai-report-block-icon" aria-hidden>
+                    {s.icon}
+                  </span>
+                  {s.title}
+                </h3>
+              </header>
+              {isEditing ? (
+                <textarea
+                  className="ai-report-textarea"
+                  value={flat || ''}
+                  onChange={(e) => setEditForm({ ...editForm, [s.key]: e.target.value })}
+                />
+              ) : (
+                <AiReportSectionBody sectionKey={String(s.key)} value={raw} />
+              )}
+            </section>
+          )
+        })}
+      </div>
+    </article>
   )
 }
 
@@ -925,24 +1025,46 @@ export default function AiReaderPageWrapper() {
 
 function AiReaderPage() {
   const navigate = useNavigate()
+  const session = useSyncExternalStore(
+    subscribeAiGenerateSession,
+    getAiGenerateSession,
+    getAiGenerateSession,
+  )
   const [books, setBooks] = useState<AiReaderBook[]>([])
-  const [selectedIds, setSelectedIds] = useState<string[]>([])
+  const [selectedIds, setSelectedIds] = useState<string[]>(() => {
+    const s = getAiGenerateSession()
+    if (
+      s.bookIds.length &&
+      (s.status === 'streaming' || s.status === 'done' || s.status === 'error' || s.status === 'disconnected')
+    ) {
+      return s.bookIds
+    }
+    return []
+  })
   const [materials, setMaterials] = useState<AiMaterial[]>([])
-  const [report, setReport] = useState<AiReportContent | null>(null)
-  const [reportId, setReportId] = useState<string | null>(null)
-  const [reportGenAt, setReportGenAt] = useState<string | null>(null)
+  const [report, setReport] = useState<AiReportContent | null>(() => getAiGenerateSession().report)
+  const [reportId, setReportId] = useState<string | null>(() => getAiGenerateSession().reportId)
+  const [reportGenAt, setReportGenAt] = useState<string | null>(() => getAiGenerateSession().reportGenAt)
   const [config, setConfig] = useState<AiConfig | null>(null)
   const [providers, setProviders] = useState<AiProvider[]>([])
-  const [streaming, setStreaming] = useState(false)
-  const [streamedChars, setStreamedChars] = useState(0)
-  const streamAbortRef = useRef<AbortController | null>(null)
   const [loadingBooks, setLoadingBooks] = useState(true)
   const [showSettings, setShowSettings] = useState(false)
   const [showHistory, setShowHistory] = useState(false)
   const [historyReports, setHistoryReports] = useState<
     { id: string; books: { id: string; title: string; cover: string | null }[]; generated_at: string; book_ids: string[] }[]
   >([])
-  const [mobileTab, setMobileTab] = useState<'books' | 'material' | 'report'>('books')
+  const [mobileTab, setMobileTab] = useState<'books' | 'material' | 'report'>(() => {
+    const s = getAiGenerateSession()
+    if (
+      s.status === 'streaming' ||
+      s.status === 'disconnected' ||
+      s.status === 'error' ||
+      (s.status === 'done' && (s.report || s.reportId))
+    ) {
+      return 'report'
+    }
+    return 'books'
+  })
   const [deleteReportId, setDeleteReportId] = useState<string | null>(null)
   const [deletingReport, setDeletingReport] = useState(false)
   const [excludedMaterialIds, setExcludedMaterialIds] = useState<Set<string>>(new Set())
@@ -951,6 +1073,57 @@ function AiReaderPage() {
   const [includeFullText, setIncludeFullText] = useState(false)
 
   const [searchQuery, setSearchQuery] = useState('')
+
+  const streaming = session.status === 'streaming'
+  const streamedChars = session.streamedChars
+  const sessionPhase = session.phase
+  const interrupt =
+    session.status === 'disconnected'
+      ? ({ kind: 'disconnected' as const, message: session.error })
+      : session.status === 'error'
+        ? ({ kind: 'error' as const, message: session.error })
+        : null
+  const sessionOwnsSelection =
+    session.bookIds.length > 0 && sameBookIds(session.bookIds, selectedIds)
+
+  // 切回本页：若仍有进行中/刚完成/中断的生成会话，确保落在报告区
+  useEffect(() => {
+    const s = getAiGenerateSession()
+    if (!s.bookIds.length) return
+    if (
+      s.status !== 'streaming' &&
+      s.status !== 'done' &&
+      s.status !== 'error' &&
+      s.status !== 'disconnected'
+    ) {
+      return
+    }
+    setSelectedIds(s.bookIds)
+    setMobileTab('report')
+    if (s.report) {
+      setReport(s.report)
+      setReportId(s.reportId)
+      setReportGenAt(s.reportGenAt)
+    }
+  }, [])
+
+  const prevSessionStatus = useRef(session.status)
+  // 会话在后台跑完时，同步到当前页状态（错误/断线用面板展示，不再 toast 刷屏）
+  useEffect(() => {
+    if (session.status === 'done' && session.report && sessionOwnsSelection) {
+      setReport(session.report)
+      setReportId(session.reportId)
+      setReportGenAt(session.reportGenAt)
+      setMobileTab('report')
+    }
+    if (
+      (session.status === 'disconnected' || session.status === 'error') &&
+      prevSessionStatus.current !== session.status
+    ) {
+      setMobileTab('report')
+    }
+    prevSessionStatus.current = session.status
+  }, [session, sessionOwnsSelection])
 
   const loadConfig = useCallback(async () => {
     try {
@@ -982,6 +1155,9 @@ function AiReaderPage() {
   useEffect(() => {
     const ids = selectedIds.join(',')
     if (!selectedIds.length) {
+      // 生成进行中/中断恢复时不要因短暂空选中清空界面
+      const st = getAiGenerateSession().status
+      if (st === 'streaming' || st === 'disconnected' || st === 'error') return
       setMaterials([])
       setReport(null)
       setReportId(null)
@@ -989,6 +1165,21 @@ function AiReaderPage() {
       return
     }
     api.get<AiMaterial[]>(`/api/ai-reader/material?book_ids=${ids}`).then(setMaterials).catch(() => {})
+
+    const s = getAiGenerateSession()
+    if (
+      (s.status === 'streaming' || s.status === 'disconnected' || s.status === 'error') &&
+      sameBookIds(s.bookIds, selectedIds)
+    ) {
+      return
+    }
+    if (s.status === 'done' && sameBookIds(s.bookIds, selectedIds) && s.report) {
+      setReport(s.report)
+      setReportId(s.reportId)
+      setReportGenAt(s.reportGenAt)
+      return
+    }
+
     api
       .get<AiReport | null>(`/api/ai-reader/report?book_ids=${ids}`)
       .then((r) => {
@@ -1041,116 +1232,48 @@ function AiReaderPage() {
   }
 
   function toggleBook(id: string) {
+    if (streaming) {
+      toast.message('报告生成中，请先停止后再改选书', { id: 'ai-gen-lock-select' })
+      return
+    }
+    if (interrupt) {
+      toast.message('请先继续或关闭中断提示后再改选书', { id: 'ai-gen-lock-select' })
+      return
+    }
     setSelectedIds((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]))
     setExcludedMaterialIds(new Set())
   }
 
   function stopGenerating() {
-    streamAbortRef.current?.abort()
+    stopAiGenerateSession()
+    toast('已停止生成')
   }
 
   async function generateReport(force = false) {
     if (!selectedIds.length) return
-    setStreaming(true)
-    setStreamedChars(0)
-    setReport(null)
     setMobileTab('report')
-    const token = getToken() || ''
-    const controller = new AbortController()
-    streamAbortRef.current = controller
-    try {
-      const excludeIds = Array.from(excludedMaterialIds).join(',')
-      const params = new URLSearchParams({
-        book_ids: selectedIds.join(','),
-        force: String(force),
-        include_full_text: String(includeFullText),
-      })
-      if (excludeIds) params.set('exclude_ids', excludeIds)
-      const resp = await fetch(`${BASE_URL}/api/ai-reader/generate/stream?${params.toString()}`, {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${token}` },
-        signal: controller.signal,
-      })
-      if (!resp.ok) {
-        const errText = await resp.text().catch(() => '')
-        throw new Error(errText || `生成失败（${resp.status}）`)
-      }
-      const reader = resp.body!.getReader()
-      const decoder = new TextDecoder()
-      // 后端是标准 SSE 格式：一行一个 `data: {...}\n\n`，之前这里直接把整段
-      // 原始字节拼成字符串再 JSON.parse，等于拿 "data: {...}\ndata: {...}\n..."
-      // 这种事件流语法去当 JSON 解析——必然失败，界面上还会先糊一大坨原始
-      // SSE 帧文本，这正是「内容特别多、最后还失败」的根因。这里改成按 SSE
-      // 规范逐行解析，只把 content 片段拼成真正的报告文本。
-      let buffer = ''
-      let reportText = ''
-      let sawDone = false
-      let streamError: string | null = null
-      while (true) {
-        const { done, value } = await reader.read()
-        if (done) break
-        buffer += decoder.decode(value, { stream: true })
-        const events = buffer.split('\n\n')
-        buffer = events.pop() || ''
-        for (const evt of events) {
-          const line = evt.trim()
-          if (!line.startsWith('data:')) continue
-          const payload = line.slice(5).trim()
-          if (payload === '[DONE]') {
-            sawDone = true
-            continue
-          }
-          try {
-            const obj = JSON.parse(payload)
-            if (obj.error) {
-              streamError = obj.error
-              continue
-            }
-            if (typeof obj.content === 'string') {
-              reportText += obj.content
-              setStreamedChars(reportText.length)
-            }
-          } catch {
-            /* 单个事件片段解析失败就跳过，不影响整体 */
-          }
-        }
-      }
-      if (streamError) throw new Error(streamError)
-      if (!sawDone && !reportText) throw new Error('生成中断，未收到完整报告')
-
-      let clean = reportText.trim()
-      if (clean.startsWith('```')) {
-        clean = clean.split('\n').slice(1).join('\n')
-        clean = clean.replace(/```\s*$/, '').trim()
-      }
-      let parsed: AiReportContent
-      try {
-        parsed = JSON.parse(clean)
-      } catch {
-        // 输出被截断等原因导致不是合法 JSON 时，至少把已生成的文字原样展示出来，
-        // 而不是直接报错让用户一无所获
-        parsed = { raw: reportText } as AiReportContent
-      }
-      setReport(parsed)
-      const r = await api.get<AiReport | null>(`/api/ai-reader/report?book_ids=${selectedIds.join(',')}`)
-      if (r) {
-        setReport(r.report)
-        setReportId(r.id)
-        setReportGenAt(r.generated_at)
-      }
-    } catch (e: unknown) {
-      if ((e as Error)?.name === 'AbortError') {
-        toast('已停止生成')
-      } else {
-        toast.error((e as Error)?.message || '生成失败')
-      }
-    } finally {
-      setStreaming(false)
-      streamAbortRef.current = null
-    }
+    setReport(null)
+    setReportId(null)
+    setReportGenAt(null)
+    await startAiGenerateSession({
+      bookIds: selectedIds,
+      force,
+      includeFullText,
+      excludeIds: Array.from(excludedMaterialIds),
+    })
   }
 
-  const hasReport = !!report && !streaming
+  async function retryGenerate() {
+    setMobileTab('report')
+    setReport(null)
+    await retryAiGenerateSession()
+  }
+
+  function dismissInterrupt() {
+    clearAiGenerateSession()
+  }
+
+  const hasReport = !!report && !streaming && !interrupt
 
   return (
     <>
@@ -1287,6 +1410,13 @@ function AiReaderPage() {
                       label="停止生成"
                       onClick={stopGenerating}
                     />
+                  ) : interrupt ? (
+                    <PageSegItem
+                      primary
+                      icon={<RotateCcw size={13} />}
+                      label="继续生成"
+                      onClick={() => void retryGenerate()}
+                    />
                   ) : (
                     <PageSegItem
                       primary
@@ -1301,21 +1431,31 @@ function AiReaderPage() {
             </div>
 
             <div className="ai-reader-col-scroll">
-              {!streaming && !report && !selectedIds.length && (
+              {!streaming && !interrupt && !report && !selectedIds.length && (
                 <div className="empty-state" style={{ minHeight: 220 }}>
                   <p style={{ marginTop: 8 }}>选择书籍后点击「生成伴读报告」</p>
                   <p style={{ fontSize: 12, color: 'var(--ink-faint)' }}>结合高亮、笔记与引用，生成深度阅读报告</p>
                 </div>
               )}
-              {!streaming && !report && selectedIds.length > 0 && (
+              {!streaming && !interrupt && !report && selectedIds.length > 0 && (
                 <div className="empty-state" style={{ minHeight: 220 }}>
                   <Sparkles size={36} strokeWidth={1.2} style={{ color: 'var(--accent)' }} />
                   <p style={{ marginTop: 8 }}>点击「生成伴读报告」开始分析</p>
                 </div>
               )}
 
-              <ReportView report={report} reportId={reportId} streaming={streaming} streamedChars={streamedChars} onSaved={(r) => setReport(r)} />
               <ChatPanel bookIds={selectedIds} hasReport={hasReport} />
+              <ReportView
+                report={report}
+                reportId={reportId}
+                streaming={streaming}
+                streamedChars={streamedChars}
+                phase={sessionPhase}
+                interrupt={interrupt}
+                onRetry={() => void retryGenerate()}
+                onDismissInterrupt={dismissInterrupt}
+                onSaved={(r) => setReport(r)}
+              />
             </div>
           </div>
         </div>

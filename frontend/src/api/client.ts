@@ -1,3 +1,5 @@
+import { createRequestId, formatApiErrorMessage, getRequestIdHeaderName } from '../lib/requestId'
+
 const TOKEN_KEY = 'moyin_token'
 
 /** 优先 localStorage（保持登录），否则 sessionStorage（关闭标签/浏览器即失效） */
@@ -30,9 +32,11 @@ export function setUnauthorizedHandler(handler: UnauthorizedHandler | null) {
 
 export class ApiError extends Error {
   status: number
-  constructor(status: number, message: string) {
+  requestId: string | null
+  constructor(status: number, message: string, requestId: string | null = null) {
     super(message)
     this.status = status
+    this.requestId = requestId
   }
 }
 
@@ -47,8 +51,14 @@ export async function apiRequest<T = unknown>(path: string, options: RequestOpti
   if (!(options.body instanceof FormData) && options.body && !headers.has('Content-Type')) {
     headers.set('Content-Type', 'application/json')
   }
+  const headerName = getRequestIdHeaderName()
+  if (!headers.has(headerName)) {
+    headers.set(headerName, createRequestId())
+  }
+  const outboundId = headers.get(headerName)
 
   const resp = await fetch(path, { ...options, headers })
+  const responseId = resp.headers.get(headerName) || outboundId
 
   if (!resp.ok) {
     let detail = resp.statusText
@@ -67,7 +77,7 @@ export async function apiRequest<T = unknown>(path: string, options: RequestOpti
         /* ignore */
       }
     }
-    throw new ApiError(resp.status, detail)
+    throw new ApiError(resp.status, formatApiErrorMessage(String(detail), responseId), responseId)
   }
 
   if (options.raw) return resp as unknown as T

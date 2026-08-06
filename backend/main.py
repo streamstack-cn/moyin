@@ -24,6 +24,7 @@ import api_highlights
 import api_libraries
 import api_meta
 import api_notes
+import api_reader_translate
 import api_search
 import api_tags
 from database import SessionLocal, init_db
@@ -54,6 +55,14 @@ def on_startup():
     try:
         ensure_admin_seed(db)
         api_books._cleanup_orphan_tags(db)  # 自愈历史遗留的 0 计数僵尸标签
+        try:
+            from services.fs_browse import heal_book_file_paths
+
+            n = heal_book_file_paths(db)
+            if n:
+                logger.info("已按当前书库挂载根自愈 %s 条文件路径", n)
+        except Exception as e:  # noqa: BLE001
+            logger.warning("书库路径自愈跳过：%s", e)
         from services import library_jobs, library_watcher
 
         settings = library_jobs.load_schedule_settings(db)
@@ -101,6 +110,7 @@ app.include_router(api_tags.collections_router)
 app.include_router(api_admin.router)
 app.include_router(api_admin.settings_router)
 app.include_router(api_ai_reader.router)
+app.include_router(api_reader_translate.router)
 
 
 @app.get("/api/health")

@@ -51,6 +51,11 @@ def normalize_book_path(path: str) -> str:
         return ""
     raw = str(path).strip()
     try:
+        from services.fs_browse import resolve_book_file_path
+
+        remapped = resolve_book_file_path(raw)
+        if remapped:
+            return remapped
         p = Path(raw).expanduser()
         if p.exists():
             return str(p.resolve())
@@ -656,10 +661,24 @@ async def scan_library(db: Session, library: Library, cancel_check=None) -> dict
             "removed": 0,
         }
 
-    # 再扫一遍：库内仍指向失效路径的书，按 hash 在目录中找回；找回失败则删除记录
+    # 再扫一遍：库内仍指向失效路径的书，先按挂载根重绑，再按 hash 找回；仍失败则删除记录
+    from services.fs_browse import resolve_book_file_path
+
     books = db.query(Book).filter(Book.library_id == library.id).all()
-    orphan_books = [b for b in books if b.file_path and not Path(b.file_path).exists()]
-    claimed = {b.file_path for b in books if b.file_path and Path(b.file_path).exists()}
+    orphan_books = []
+    claimed: set[str] = set()
+    for b in books:
+        if not b.file_path:
+            continue
+        resolved = resolve_book_file_path(b.file_path)
+        if resolved:
+            if resolved != b.file_path:
+                logger.info("扫描路径自愈 %s → %s", b.file_path, resolved)
+                b.file_path = resolved
+                rebound += 1
+            claimed.add(resolved)
+            continue
+        orphan_books.append(b)
     hash_index: dict[str, str] = {}
     if orphan_books:
         for file_path in disk_files:

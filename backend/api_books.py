@@ -240,10 +240,23 @@ def list_books(
         query = query.order_by(Book.added_at.desc())
 
     books = query.all()
+    progress_service.heal_finished_progress(db, user.id)
     progress_map = _progress_map(db, user.id)
 
     if status:
-        books = [b for b in books if (progress_map.get(b.id).status if b.id in progress_map else "unread") == status]
+        books = [
+            b
+            for b in books
+            if (
+                progress_service.status_from_percent(
+                    progress_map[b.id].percent,
+                    stored_status=progress_map[b.id].status,
+                )
+                if b.id in progress_map
+                else "unread"
+            )
+            == status
+        ]
 
     # 收藏筛选：按收藏时间倒序
     if meta == "favorited":
@@ -278,6 +291,7 @@ def home_feed(
         .filter(
             ReadingProgress.user_id == user.id,
             ReadingProgress.status == "reading",
+            ReadingProgress.percent >= progress_service.READING_MIN_PERCENT,
             ReadingProgress.percent < progress_service.FINISHED_THRESHOLD,
         )
         .order_by(ReadingProgress.updated_at.desc())
@@ -698,13 +712,25 @@ async def upload_cover(
     return {"cover_url": cover_url_for(book)}
 
 
+def _resolve_and_heal_book_path(book: Book, db: Session) -> Optional[str]:
+    """优先用库内路径；失效则按当前挂载根重绑并写回数据库。"""
+    from services.fs_browse import resolve_book_file_path
+
+    resolved = resolve_book_file_path(book.file_path)
+    if resolved and resolved != (book.file_path or ""):
+        book.file_path = resolved
+        db.commit()
+    return resolved
+
+
 @router.get("/{book_id}/file")
 def download_file(book_id: str, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
     book = db.query(Book).filter_by(id=book_id).first()
-    if not book or not Path(book.file_path).exists():
+    path = _resolve_and_heal_book_path(book, db) if book else None
+    if not book or not path:
         raise HTTPException(status_code=404, detail="原始文件不存在")
     filename = f"{book.title}.{book.file_format}"
-    return FileResponse(book.file_path, filename=filename)
+    return FileResponse(path, filename=filename)
 
 
 @router.get("/{book_id}/read")
@@ -713,11 +739,17 @@ def read_book(book_id: str, db: Session = Depends(get_db), user: User = Depends(
     if not book:
         raise HTTPException(status_code=404, detail="书籍不存在")
     if book.file_format == "pdf":
-        path = book.file_path
-        if not path or not Path(path).exists():
+        path = _resolve_and_heal_book_path(book, db)
+        if not path:
             raise HTTPException(status_code=404, detail="PDF 文件不存在")
         return FileResponse(path, media_type="application/pdf", filename=f"{book.title}.pdf")
-    path = book.file_path if book.file_format == "epub" else book.converted_path
+    if book.file_format == "epub":
+        path = _resolve_and_heal_book_path(book, db)
+    else:
+        path = book.converted_path if book.converted_path and Path(book.converted_path).exists() else None
+        if not path:
+            # 部分转换失败场景仍可能直接读到原 epub 路径
+            path = _resolve_and_heal_book_path(book, db)
     if not path or not Path(path).exists():
         raise HTTPException(status_code=404, detail="该格式暂无法在线阅读，可下载原文件")
     return FileResponse(path, media_type="application/epub+zip")

@@ -8756,7 +8756,7 @@ button.stat-strip-item.clickable.active .stat-strip-value {
   font-size: 9.5px;
   font-weight: 600;
   padding: 1px 6px;
-  border-radius: 100;
+  border-radius: 100px;
   border: 1px solid currentColor;
   flex-shrink: 0;
   line-height: 1.5;

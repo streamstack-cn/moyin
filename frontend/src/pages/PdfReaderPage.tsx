@@ -782,8 +782,11 @@ export default function PdfReaderPage({ book }: Props) {
         if (live) {
           lastSelectionActivityAtRef.current = Date.now()
           if (live !== selectionRef.current.text) {
+            // 先同步底栏文案，再刷新 locator，避免「屏幕选中 ≠ 下方显示」
+            const synced = { ...selectionRef.current, text: live }
+            selectionRef.current = synced
+            setSelection(synced)
             selectingRef.current = false
-            // 通过 mobilePresent 强制刷新（内部 presentSelection）
             mobilePresentRef.current()
           }
           return
@@ -994,9 +997,10 @@ export default function PdfReaderPage({ book }: Props) {
     const textLayerEl = textLayerRef.current
     const viewportEl = containerRef.current
     if (!textLayerEl || !viewportEl) return false
-    const text = selectionText()
+    // 底栏展示以 DOM 选区为准，避免 locator 映射文本与屏幕高亮不一致
+    const domText = selectionText()
     const gestureMs = selectStartedAtRef.current ? Date.now() - selectStartedAtRef.current : undefined
-    if (!force && isAccidentalTapSelection(text, pointerMovePxRef.current, gestureMs)) {
+    if (!force && isAccidentalTapSelection(domText, pointerMovePxRef.current, gestureMs)) {
       clearDomSelection()
       return false
     }
@@ -1005,14 +1009,15 @@ export default function PdfReaderPage({ book }: Props) {
       // 扩选过程中 locator 偶发解析失败：保留 DOM 选区，勿清
       return false
     }
-    if (!force && isAccidentalTapSelection(mapped.text, pointerMovePxRef.current, gestureMs)) {
+    const displayText = domText || mapped.text
+    if (!force && isAccidentalTapSelection(displayText, pointerMovePxRef.current, gestureMs)) {
       clearDomSelection()
       return false
     }
     if (
       !force &&
       Date.now() - lastPresentAtRef.current < 50 &&
-      selectionRef.current?.text === mapped.text
+      selectionRef.current?.text === displayText
     ) {
       return true
     }
@@ -1040,7 +1045,7 @@ export default function PdfReaderPage({ book }: Props) {
         screen,
       }
     }
-    const next: PdfSelectionState = { locator: mapped.locator, text: mapped.text, anchor }
+    const next: PdfSelectionState = { locator: mapped.locator, text: displayText, anchor }
     selectionRef.current = next
     lastPresentAtRef.current = Date.now()
     if (isCompactRef.current) setChromeVisible(true)

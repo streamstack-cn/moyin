@@ -46,23 +46,30 @@ const FALLBACK_PROVIDERS: AiProvider[] = [
 
 /** 部分历史生成结果里嵌套对象用的是英文字段名，展平时翻成中文标签，避免报告里夹杂生硬的英文 key */
 const REPORT_FIELD_LABELS: Record<string, string> = {
-  insight: '洞察',
+  insight: '要点',
+  insights: '要点',
+  point: '要点',
+  key_point: '要点',
+  keyPoint: '要点',
+  takeaway: '要点',
   argument: '论证',
   argumentation: '论证',
   reasoning: '论证',
   rationale: '论证',
+  evidence: '论证',
+  support: '论证',
   my_thought_process: '我的思考',
   my_thoughts: '我的思考',
+  myThoughts: '我的思考',
   thought_process: '我的思考',
-  reflection: '反思',
+  thoughtProcess: '我的思考',
+  reflection: '我的思考',
+  reflections: '我的思考',
   action: '行动建议',
   question: '疑问',
   summary: '总结',
   quote: '引用',
-  evidence: '论据',
   conclusion: '结论',
-  point: '要点',
-  key_point: '要点',
   example: '举例',
   application: '应用',
   connection: '关联',
@@ -73,6 +80,18 @@ const REPORT_FIELD_LABELS: Record<string, string> = {
   suggestion: '建议',
   analysis: '分析',
   observation: '观察',
+  要点: '要点',
+  论证: '论证',
+  我的思考: '我的思考',
+  洞察: '要点',
+  反思: '我的思考',
+}
+
+/** 核心收获条目内字段的优先展示顺序 */
+const INSIGHT_FIELD_ORDER = ['要点', '论证', '我的思考', '洞察', '反思', '结论', '建议']
+
+function labelReportField(key: string): string {
+  return REPORT_FIELD_LABELS[key] || REPORT_FIELD_LABELS[key.toLowerCase()] || key
 }
 
 /**
@@ -87,21 +106,45 @@ const REPORT_FIELD_LABELS: Record<string, string> = {
  * 对已经生成过的历史报告同样生效，不需要重新生成。
  */
 function sanitizeReportText(text: string): string {
-  const keys = Object.keys(REPORT_FIELD_LABELS).sort((a, b) => b.length - a.length)
+  const keys = Object.keys(REPORT_FIELD_LABELS)
+    .filter((k) => /^[A-Za-z_]/.test(k))
+    .sort((a, b) => b.length - a.length)
+  if (!keys.length) return text
   const pattern = new RegExp(`(^|[\\n。！？.!?]\\s*)(${keys.join('|')})\\s*[：:]`, 'gi')
-  return text.replace(pattern, (_m, pre: string, key: string) => `${pre}${REPORT_FIELD_LABELS[key.toLowerCase()] || key}：`)
+  return text.replace(pattern, (_m, pre: string, key: string) => `${pre}${labelReportField(key)}：`)
+}
+
+function renderReportObject(obj: Record<string, unknown>): string {
+  const keys = Object.keys(obj)
+  const ordered: string[] = []
+  for (const prefer of INSIGHT_FIELD_ORDER) {
+    if (keys.includes(prefer)) ordered.push(prefer)
+  }
+  for (const k of keys) {
+    if (!ordered.includes(k)) ordered.push(k)
+  }
+  return ordered
+    .map((k) => `${labelReportField(k)}：${renderReportValue(obj[k])}`)
+    .join('\n')
 }
 
 function renderReportValue(val: unknown): string {
   if (val == null) return ''
   if (typeof val === 'string') return sanitizeReportText(val)
   if (typeof val === 'number' || typeof val === 'boolean') return String(val)
-  if (Array.isArray(val)) return val.map((v) => renderReportValue(v)).join('\n\n')
-  if (typeof val === 'object') {
-    return Object.entries(val as Record<string, unknown>)
-      .map(([k, v]) => `${REPORT_FIELD_LABELS[k] || k}：${renderReportValue(v)}`)
-      .join('\n')
+  if (Array.isArray(val)) {
+    return val
+      .map((v, i) => {
+        const body = renderReportValue(v)
+        if (!body) return ''
+        // 数组里的对象条目加序号，便于阅读
+        if (v && typeof v === 'object' && !Array.isArray(v)) return `（${i + 1}）\n${body}`
+        return body
+      })
+      .filter(Boolean)
+      .join('\n\n')
   }
+  if (typeof val === 'object') return renderReportObject(val as Record<string, unknown>)
   return String(val)
 }
 

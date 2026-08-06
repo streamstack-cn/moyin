@@ -16,7 +16,7 @@ export function clearDomSelection(win: Window | null | undefined = window) {
 
 export function selectionText(win: Window | null | undefined = window): string {
   try {
-    return win?.getSelection()?.toString().trim() || ''
+    return (win?.getSelection()?.toString() || '').replace(/\u00a0/g, ' ').trim()
   } catch {
     return ''
   }

@@ -48,6 +48,15 @@ import {
 } from '../lib/readerFonts'
 import { copyTextToClipboard } from '../lib/clipboard'
 import { isAppleTouchDevice } from '../lib/platform'
+import { pickDefaultBasketProjectId } from '../lib/citationBasket'
+import {
+  EPUB_LOC_CHARS,
+  findChapterTitle,
+  flattenToc,
+  joinEpubHref,
+  loadCachedEpubLocations,
+  saveCachedEpubLocations,
+} from '../lib/epubNav'
 import { BASKET_PROJECT_KEY, type SelectionAnchor } from '../lib/readerConstants'
 import {
   clearDomSelection,
@@ -55,6 +64,7 @@ import {
   pointerTravel,
   selectionText,
 } from '../lib/readerGestures'
+import { READER_THEMES, resolveReaderTheme } from '../lib/readerTheme'
 import {
   resolveHorizontalSwipe,
   resolveHorizontalSwipeByTravel,
@@ -77,38 +87,6 @@ import { useReaderChromeInset } from '../lib/useReaderChromeInset'
 import { useReaderExitBackGesture } from '../hooks/useReaderExitBackGesture'
 import PdfReaderPage from './PdfReaderPage'
 
-/** EPUB 无固定纸书页码；用字符块生成虚拟页。约 720 字更接近一屏中文阅读量。 */
-const EPUB_LOC_CHARS = 720
-
-function epubLocCacheKey(bookId: string) {
-  return `moyin_epub_locs_v2_${bookId}_${EPUB_LOC_CHARS}`
-}
-
-function loadCachedEpubLocations(bookId: string): string | null {
-  try {
-    return localStorage.getItem(epubLocCacheKey(bookId))
-  } catch {
-    return null
-  }
-}
-
-function saveCachedEpubLocations(bookId: string, json: string) {
-  try {
-    localStorage.setItem(epubLocCacheKey(bookId), json)
-  } catch {
-    /* quota / private mode */
-  }
-}
-
-const READER_THEMES = [
-  { id: 'paper', label: '米白', bg: '#f4ecd8', fg: '#2b2620' },
-  { id: 'white', label: '纯白', bg: '#ffffff', fg: '#1c1c1c' },
-  { id: 'sepia', label: '护眼', bg: '#eee3ca', fg: '#3a3226' },
-  { id: 'mint', label: '薄荷', bg: '#dcece6', fg: '#1f322b' },
-  { id: 'dark', label: '深灰', bg: '#2a2a2a', fg: '#d8d3c8' },
-  { id: 'black', label: '纯黑', bg: '#000000', fg: '#b8b8b8' },
-]
-
 type DrawerTab = 'toc' | 'notes' | 'search' | 'journal' | 'translate' | null
 
 interface SelectionState {
@@ -127,34 +105,6 @@ interface SearchHit {
   chapter_title: string
   cfi_anchor: string
   snippet: string
-}
-
-function flattenToc(items: NavItem[], depth = 0): { item: NavItem; depth: number }[] {
-  return items.flatMap((item) => [{ item, depth }, ...flattenToc(item.subitems || [], depth + 1)])
-}
-
-/** 合并 EPUB 相对路径（处理 ../） */
-function joinEpubHref(baseDir: string, rel: string): string {
-  if (!rel) return baseDir.replace(/\/$/, '')
-  if (rel.startsWith('#') || rel.startsWith('epubcfi(') || /^(https?:|mailto:)/i.test(rel)) return rel
-  const raw = rel.startsWith('/') ? rel.replace(/^\/+/, '') : `${baseDir}${rel}`
-  const stack: string[] = []
-  for (const part of raw.split('/')) {
-    if (!part || part === '.') continue
-    if (part === '..') stack.pop()
-    else stack.push(part)
-  }
-  return stack.join('/')
-}
-
-function pickDefaultBasketProjectId(projects: CitationProject[]): string {
-  try {
-    const saved = localStorage.getItem(BASKET_PROJECT_KEY)
-    if (saved && projects.some((p) => p.id === saved)) return saved
-  } catch {
-    /* private mode */
-  }
-  return projects.find((p) => p.name === '默认引用篮')?.id || projects[0]?.id || ''
 }
 
 export default function ReaderPage() {
@@ -3467,25 +3417,4 @@ function EpubReaderPage({ bookId }: { bookId: string }) {
       </div>
     </div>
   )
-}
-
-function resolveReaderTheme(themeId: string, customBg: string): { bg: string; fg: string } {
-  if (themeId === 'custom') {
-    // 自定义背景色时，按亮度自动选择黑/白文字，保证可读性
-    const hex = customBg.replace('#', '')
-    const r = parseInt(hex.substring(0, 2), 16) || 0
-    const g = parseInt(hex.substring(2, 4), 16) || 0
-    const b = parseInt(hex.substring(4, 6), 16) || 0
-    const luminance = (0.299 * r + 0.587 * g + 0.114 * b) / 255
-    return { bg: customBg, fg: luminance > 0.5 ? '#2b2620' : '#e8e3d8' }
-  }
-  const preset = READER_THEMES.find((t) => t.id === themeId)
-  return preset ? { bg: preset.bg, fg: preset.fg } : { bg: '#f4ecd8', fg: '#2b2620' }
-}
-
-function findChapterTitle(toc: NavItem[], href: string): string {
-  const flat = flattenToc(toc)
-  const cleanHref = href.split('#')[0]
-  const match = flat.find((f) => f.item.href.split('#')[0] === cleanHref)
-  return match?.item.label?.trim() || ''
 }

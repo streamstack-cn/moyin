@@ -16,6 +16,7 @@ import type { CitationItem, CitationProject } from '../api/types'
 import ConfirmDialog from '../components/ConfirmDialog'
 import Modal from '../components/Modal'
 import { PageSeg, PageSegItem } from '../components/PageSeg'
+import { copyTextToClipboard } from '../lib/clipboard'
 import { onMainResume } from '../lib/mainResume'
 
 interface PreviewFootnote {
@@ -50,12 +51,9 @@ export default function CitationBasketPage() {
       toast.error(`${label}为空`)
       return
     }
-    try {
-      await navigator.clipboard.writeText(text)
-      toast.success(`${label}已复制`)
-    } catch {
-      toast.error('复制失败')
-    }
+    const ok = await copyTextToClipboard(text)
+    if (ok) toast.success(`${label}已复制`)
+    else toast.error('复制失败，请长按选中文本后使用系统复制')
   }
 
   function pickDefaultProjectId(rows: CitationProject[]): string {

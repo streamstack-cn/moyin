@@ -7,10 +7,77 @@ fs_browse.py — 供"浏览挂载目录、选择文件夹作为书架"功能使�
 书架的显示名称（映射名）与实际文件夹名解耦，可随时重命名。
 """
 
+import logging
 import os
 from pathlib import Path
+from typing import Optional
+
+logger = logging.getLogger("moyin.fs_browse")
 
 MOUNT_ROOT = Path(os.environ.get("MOYIN_LIBRARY_ROOT", "/library-source")).resolve()
+
+
+def resolve_book_file_path(stored: Optional[str]) -> Optional[str]:
+    """把库内保存的电子书绝对路径解析到当前挂载根下的真实文件。
+
+    支持两种常见挂载互迁而不丢书：
+    - 推荐：宿主机书库 → /library-source（可不设 MOYIN_LIBRARY_ROOT）
+    - 兼容：宿主机书库 → 自定义路径，并设 MOYIN_LIBRARY_ROOT 与之相同
+
+    例如库内是 /Volumes/8T/计算机/a.epub，当前根是 /library-source，
+    会尝试命中 /library-source/计算机/a.epub。
+    """
+    if not stored:
+        return None
+    raw = str(stored).strip()
+    if not raw:
+        return None
+    p = Path(raw).expanduser()
+    try:
+        if p.is_file():
+            return str(p.resolve())
+    except OSError:
+        pass
+
+    if not MOUNT_ROOT.exists():
+        return None
+
+    parts = p.parts
+    start = 1 if parts and parts[0] == "/" else 0
+    # 优先最长相对路径，避免仅靠文件名误匹配
+    for i in range(start, len(parts)):
+        candidate = MOUNT_ROOT.joinpath(*parts[i:])
+        try:
+            if candidate.is_file():
+                return str(candidate.resolve())
+        except OSError:
+            continue
+    return None
+
+
+def heal_book_file_paths(db) -> int:
+    """启动时把失效的 file_path 重绑到当前 MOUNT_ROOT；返回重写条数。"""
+    from models import Book
+
+    fixed = 0
+    books = db.query(Book).filter(Book.file_path.isnot(None)).all()
+    for book in books:
+        old = book.file_path or ""
+        if not old:
+            continue
+        try:
+            if Path(old).expanduser().is_file():
+                continue
+        except OSError:
+            pass
+        resolved = resolve_book_file_path(old)
+        if resolved and resolved != old:
+            logger.info("书库路径自愈 %s → %s", old, resolved)
+            book.file_path = resolved
+            fixed += 1
+    if fixed:
+        db.commit()
+    return fixed
 
 
 def _safe_resolve(rel_path: str) -> Path:

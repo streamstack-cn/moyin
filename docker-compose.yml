@@ -16,12 +16,12 @@ services:
     volumes:
       # 全部应用数据（数据库/封面/转换文件）。勿删、换目录启动等于新库
       - ./config:/config
-      # 电子书源目录（读写）。扫描入库后容器内必须能访问到这些文件：
+      # 电子书源目录（读写）→ 容器内固定 /library-source（默认 MOYIN_LIBRARY_ROOT，可省略该变量）
       # - /path/to/your/ebooks:/library-source
     environment:
       ADMIN_USERNAME: admin
       ADMIN_PASSWORD: change_me          # 仅首次（config 内尚无用户）生效
-      MOYIN_SECRET_KEY: change_me_secret # 请改成随机长字符串
-      MOYIN_LIBRARY_ROOT: /library-source
-      # 本文件不含 Redis。需要请改用 docker-compose.redis.yml
+      MOYIN_SECRET_KEY: change_me_secret # 登录 JWT 密钥（不是 API Key）；请改成随机长串
+      # 本文件不含 Redis。需要请改用 docker-compose.redis.yml，或设置 REDIS_URL 指向已有实例：
+      # REDIS_URL: redis://:password@192.168.0.101:6379/2
 

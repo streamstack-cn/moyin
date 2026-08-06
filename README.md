@@ -1,6 +1,6 @@
 # 墨引 MoYin
 
-当前版本：**V0.6**（应用内显示的内部版本号；Docker 镜像标签为 `latest`，亦可拉取 `v0.6`）
+当前版本：**V0.65**（应用内显示的内部版本号；Docker 镜像标签为 `latest`，亦可拉取 `v0.65`）
 
 **私有化部署的电子书阅读 · 标注 · 引用 · AI 伴读管理系统**
 
@@ -109,15 +109,14 @@ services:
     volumes:
       # 全部应用数据（数据库/封面/转换文件）。勿删、换目录启动等于新库
       - ./config:/config
-      # 【请改成你的电子书目录】左侧是宿主机路径，不要加 :ro
+      # 【请改成你的电子书目录】左侧是宿主机路径，右侧固定 /library-source，不要加 :ro
       # Windows 示例：D:/ebooks:/library-source
       # Mac 示例：/Users/你的用户名/Books:/library-source
       - /path/to/your/ebooks:/library-source
     environment:
       ADMIN_USERNAME: admin
       ADMIN_PASSWORD: change_me          # 【请修改】仅首次建库生效
-      MOYIN_SECRET_KEY: change_me_secret # 【请修改】随机长字符串
-      MOYIN_LIBRARY_ROOT: /library-source
+      MOYIN_SECRET_KEY: change_me_secret # 【请修改】登录 JWT 密钥（不是 API Key）
       # Redis 密码须与上方 --requirepass 一致（改密码时两处一起改）
       REDIS_URL: redis://:change_me_redis@redis:6379/0
 ```
@@ -140,14 +139,54 @@ services:
       - "6173:6173"
     volumes:
       - ./config:/config
-      # 【请改成你的电子书目录】左侧是宿主机路径，不要加 :ro
+      # 【请改成你的电子书目录】左侧宿主机路径 → 右侧固定 /library-source，不要加 :ro
       - /path/to/your/ebooks:/library-source
     environment:
       ADMIN_USERNAME: admin
       ADMIN_PASSWORD: change_me          # 【请修改】仅首次建库生效
-      MOYIN_SECRET_KEY: change_me_secret # 【请修改】随机长字符串
-      MOYIN_LIBRARY_ROOT: /library-source
+      MOYIN_SECRET_KEY: change_me_secret # 【请修改】登录 JWT 密钥（不是 API Key）
 ```
+
+### 方式 C：复用已有 Redis（局域网 / 宿主机）
+
+Compose 里**不必**再起 `redis` 服务。电子书仍挂到容器内 `/library-source`（可省略 `MOYIN_LIBRARY_ROOT`）。
+
+```yaml
+# 墨引 MoYin — 复用已有 Redis
+services:
+  moyin:
+    image: streamstack/moyin:latest
+    container_name: moyin
+    restart: unless-stopped
+    ports:
+      - "6173:6173"
+    volumes:
+      - ./config:/config
+      - /path/to/your/ebooks:/library-source
+    environment:
+      TZ: Asia/Shanghai
+      ADMIN_USERNAME: admin
+      ADMIN_PASSWORD: change_me
+      MOYIN_SECRET_KEY: change_me_secret
+      # 有密码：redis://:密码@主机:端口/库号
+      # 无密码：redis://192.168.0.101:6379/2
+      REDIS_URL: redis://:your_redis_password@192.168.0.101:6379/2
+```
+
+| Redis 位置 | `REDIS_URL` 示例 | 是否需要 `extra_hosts` |
+|---|---|---|
+| 同 Compose 内的 `redis` 服务 | `redis://:密码@redis:6379/0` | 否 |
+| 局域网其它机器 | `redis://:密码@192.168.0.101:6379/2` | 否 |
+| 本机（宿主机）上的 Redis | `redis://:密码@host.docker.internal:6379/2` | Linux 建议加（见下）；Docker Desktop / OrbStack 通常可省略 |
+
+连宿主机 Redis 时（Linux 常见），可加：
+
+```yaml
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+```
+
+注意：`redis://:192.168.0.101:6379/2` **是错的**——`:` 与 `@` 之间是密码，会把 IP 当成密码。正确是 `redis://192.168.0.101:6379/2`（无密码）或 `redis://:密码@192.168.0.101:6379/2`。
 
 仓库里也有同名文件备查：[`docker-compose.yml`](./docker-compose.yml)、[`docker-compose.redis.yml`](./docker-compose.redis.yml)。
 
@@ -156,8 +195,8 @@ services:
 | 要点 | 说明 |
 |------|------|
 | **数据只在 `./config`** | 数据库、封面、转换文件、上传书都在宿主机 `./config`（容器内 `/config`）。换目录启动、删掉 `config`、挂错路径，都会看成空库。升级镜像务必保留该目录。 |
-| **Redis 看 Compose** | 精简版不含 Redis（正常）；要缓存 / 登录限流用标准版，并确认日志有 `Redis 已就绪`。 |
-| **电子书目录必须挂载且可写** | 把 `/path/to/your/ebooks` 换成真实路径，**不要加 `:ro`**。`MOYIN_LIBRARY_ROOT` 须与容器内挂载点一致（默认 `/library-source`）。**删除图书会物理删除源文件。** |
+| **Redis 可选** | 精简版可不配；标准版用同文件里的 Redis；也可 `REDIS_URL` 指向局域网 / 宿主机已有实例（见方式 C）。 |
+| **电子书目录必须挂载且可写** | 推荐 `- /你的书库:/library-source`（**不要加 `:ro`**）。挂到该默认路径时**不必**再写 `MOYIN_LIBRARY_ROOT`。**删除图书会物理删除源文件。** |
 | **管理员密码只在首次生效** | `ADMIN_PASSWORD` 仅在 `./config` 里还没有用户时创建账号。已有库后改 yml **不会**改旧密码。 |
 | **本地开发 ≠ Docker 数据** | 本地 `uvicorn` 默认写 `backend/data`；Docker 用 `./config`。两套互不相通，迁移需手动拷贝并挂载原来的书库路径。 |
 
@@ -170,9 +209,9 @@ services:
 | 变量 | 说明 |
 |------|------|
 | `ADMIN_USERNAME` / `ADMIN_PASSWORD` | 首次启动创建的管理员（库中已有用户后不覆盖） |
-| `MOYIN_SECRET_KEY` | JWT 密钥，请改成随机长串 |
-| `REDIS_URL` | 仅标准版需要；密码与 Redis `--requirepass` 一致 |
-| `MOYIN_LIBRARY_ROOT` | 目录浏览根路径，默认 `/library-source` |
+| `MOYIN_SECRET_KEY` | **登录 JWT 签名密钥**（签发/校验浏览器登录 token）。**不是**对外 API Key，也不是 Redis 密码。正式环境务必改成随机长串；不写则用内置开发默认值（不安全） |
+| `REDIS_URL` | 可选。格式 `redis://:密码@主机:端口/库号`；不配则走内存缓存（功能可用，无跨实例缓存 / 登录限流） |
+| `MOYIN_LIBRARY_ROOT` | 容器内书库浏览根路径，**默认 `/library-source`**。仅当你把书挂到别的容器路径时才需要改，且须与 volume 右侧一致 |
 | `DATABASE_URL` | 可选，外挂 PostgreSQL；不设则用 `./config` 内 SQLite |
 | `GOOGLE_BOOKS_API_KEY` | 可选；也可在管理后台配置 |
 | `TZ` | 可选，如 `Asia/Shanghai` |
@@ -192,14 +231,14 @@ services:
 ## 镜像
 
 - Docker Hub：[`streamstack/moyin`](https://hub.docker.com/r/streamstack/moyin)
-- 镜像标签：推荐 **`latest`**；版本标签 **`v0.6`** 与应用内 `V0.6` 对应
+- 镜像标签：推荐 **`latest`**；版本标签 **`v0.65`** 与应用内 `V0.65` 对应
 - 平台：`linux/amd64`、`linux/arm64`（Intel / Apple Silicon / 常见 NAS 均可）
 - 内含：Nginx + FastAPI + Calibre + LibreOffice Writer
 
 ```bash
 docker pull streamstack/moyin:latest
 # 或固定版本
-docker pull streamstack/moyin:v0.6
+docker pull streamstack/moyin:v0.65
 ```
 
 ---
@@ -360,7 +399,7 @@ docker compose logs -f moyin
 | 已装过 Docker Desktop 冲突 | 同一时间只用一套引擎。`docker context ls` 选 `orbstack`，或退出 Docker Desktop。 |
 | Apple Silicon 拉取很慢或架构不对 | 官方镜像已是多架构。用 `docker pull streamstack/moyin:latest`，不要强行 `--platform` 错架构。 |
 | 升级后数据没了 | 是否换了 `~/moyin` 目录？是否删了 `config`？数据只在你挂载的 `./config`。 |
-| 本机已有 Redis 想复用 | 可用 `host.docker.internal` 指向宿主机 Redis（进阶）；新手直接用仓库标准版自带 Redis 最省事。 |
+| 本机 / 局域网已有 Redis | 见上文「方式 C」：局域网写 IP；宿主机用 `host.docker.internal`。新手用标准版自带 Redis 最省事。 |
 | 睡眠唤醒后容器异常 | OrbStack 一般会自动恢复；不行就 `docker compose up -d` 再拉起。 |
 
 ### 5. 升级 / 备份

@@ -558,6 +558,7 @@ function MatchModal({ book, onClose, onApplied }: { book: BookDetail; onClose: (
   const [loading, setLoading] = useState(false)
   const [applying, setApplying] = useState(false)
   const [hasSearched, setHasSearched] = useState(false)
+  const [googleEnabled, setGoogleEnabled] = useState(true) // 从搜索结果里动态获取
 
   const doubanCount = results.filter((r) => r.source === 'douban').length
   const googleCount = results.filter((r) => r.source === 'google').length
@@ -591,14 +592,17 @@ function MatchModal({ book, onClose, onApplied }: { book: BookDetail; onClose: (
       setResults(list)
       setParsedTitle(r.parsed_title || r.search_query || '')
       setParsedAuthors(r.parsed_authors || [])
+      // 读取 Google Books 开关状态（后端已在 sources.google.enabled 返回）
+      const gEnabled = r.sources?.google?.enabled !== false
+      setGoogleEnabled(gEnabled)
       setSourceHints({
         douban: r.sources?.douban && !r.sources.douban.ok ? r.sources.douban.error || undefined : undefined,
-        google: r.sources?.google && !r.sources.google.ok ? r.sources.google.error || undefined : undefined,
+        google: r.sources?.google && !r.sources.google.ok && gEnabled ? r.sources.google.error || undefined : undefined,
       })
       // 当前筛选无结果时，自动切到有结果的来源
       const dCount = list.filter((x) => x.source === 'douban').length
       const gCount = list.filter((x) => x.source === 'google').length
-      if (sourceFilter === 'douban' && dCount === 0 && gCount > 0) setSourceFilter('google')
+      if (sourceFilter === 'douban' && dCount === 0 && gCount > 0 && gEnabled) setSourceFilter('google')
       else if (sourceFilter === 'google' && gCount === 0 && dCount > 0) setSourceFilter('douban')
     } catch (err) {
       toast.error(err instanceof ApiError ? err.message : '搜索失败')
@@ -662,7 +666,7 @@ function MatchModal({ book, onClose, onApplied }: { book: BookDetail; onClose: (
         {(
           [
             { id: 'douban', label: '豆瓣', count: doubanCount },
-            { id: 'google', label: 'Google', count: googleCount },
+            ...(googleEnabled ? [{ id: 'google' as const, label: 'Google', count: googleCount }] : []),
           ] as const
         ).map((tab) => (
           <button

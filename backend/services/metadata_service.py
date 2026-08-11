@@ -63,6 +63,19 @@ def _google_api_key(db: Session) -> str:
     return google_books_service.resolve_api_key(_get_config(db, "GOOGLE_BOOKS_API_KEY", ""))
 
 
+def _google_enabled(db: Session) -> bool:
+    """Google Books 开关，默认开启（向下兼容旧数据库）。"""
+    row = db.query(AppConfig).filter_by(key="GOOGLE_BOOKS_ENABLED").first()
+    if not row or row.value == "":
+        return True
+    return row.value.lower() in ("1", "true", "yes", "on")
+
+
+def _google_proxy(db: Session) -> str:
+    """HTTP 代理地址，优先读数据库配置，其次环境变量。"""
+    return google_books_service.resolve_proxy(_get_config(db, "GOOGLE_BOOKS_PROXY", ""))
+
+
 def _with_proxied_covers(results: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """搜索候选的外链封面改走本站代理，避免豆瓣 CDN 防盗链导致裂图。"""
     from api_meta import proxied_cover_url
@@ -174,13 +187,13 @@ async def _search_douban_once(query: str, cookie: str) -> tuple[list[dict[str, A
     return [_douban_hit_row(h) for h in (douban_hits or [])[:24]], None
 
 
-async def _search_google(query: str, api_key: str) -> tuple[list[dict[str, Any]], Optional[str]]:
+async def _search_google(query: str, api_key: str, proxy: str = "") -> tuple[list[dict[str, Any]], Optional[str]]:
     """单次 Google 搜索：原样返回 API 顺序。不清洗、不打分、不重排。"""
     q = (query or "").strip()
     if not q:
         return [], None
     try:
-        hits = await google_books_service.search(query=q, api_key=api_key, max_results=10)
+        hits = await google_books_service.search(query=q, api_key=api_key, max_results=10, proxy=proxy)
         return list(hits or [])[:8], None
     except GoogleBooksError as exc:
         logger.warning("Google Books search failed: %s", exc.message)
@@ -190,12 +203,12 @@ async def _search_google(query: str, api_key: str) -> tuple[list[dict[str, Any]]
         return [], f"Google Books 搜索失败：{exc.__class__.__name__}"
 
 
-async def _search_google_isbn(isbn: str, api_key: str) -> tuple[list[dict[str, Any]], Optional[str]]:
+async def _search_google_isbn(isbn: str, api_key: str, proxy: str = "") -> tuple[list[dict[str, Any]], Optional[str]]:
     clean = _normalize_isbn(isbn)
     if not clean:
         return [], None
     try:
-        hits = await google_books_service.search(query="", isbn=clean, api_key=api_key, max_results=5)
+        hits = await google_books_service.search(query="", isbn=clean, api_key=api_key, max_results=5, proxy=proxy)
         return list(hits or [])[:5], None
     except GoogleBooksError as exc:
         logger.warning("Google Books ISBN search failed: %s", exc.message)
@@ -211,6 +224,7 @@ async def _search_google_enriched(
     original_title: str,
     isbn: str,
     api_key: str,
+    proxy: str = "",
 ) -> tuple[list[dict[str, Any]], Optional[str], str]:
     """
     Google 并行：原文 + 原作名 + ISBN，按 ISBN → 原作名 → 原文 合并。
@@ -221,11 +235,11 @@ async def _search_google_enriched(
 
     tasks: dict[str, asyncio.Task] = {}
     if raw_query:
-        tasks["raw"] = asyncio.create_task(_search_google(raw_query, api_key))
+        tasks["raw"] = asyncio.create_task(_search_google(raw_query, api_key, proxy))
     if ot:
-        tasks["orig"] = asyncio.create_task(_search_google(ot, api_key))
+        tasks["orig"] = asyncio.create_task(_search_google(ot, api_key, proxy))
     if clean_isbn:
-        tasks["isbn"] = asyncio.create_task(_search_google_isbn(clean_isbn, api_key))
+        tasks["isbn"] = asyncio.create_task(_search_google_isbn(clean_isbn, api_key, proxy))
 
     raw_hits: list[dict[str, Any]] = []
     orig_hits: list[dict[str, Any]] = []
@@ -270,6 +284,8 @@ async def search_candidates(
     douban_enabled = _get_config(db, "DOUBAN_ENABLED", "false") == "true"
     cookie = _get_config(db, "DOUBAN_COOKIE", "")
     google_key = _google_api_key(db)
+    google_on = _google_enabled(db)
+    google_proxy = _google_proxy(db)
     has_google_key = bool(google_key)
 
     raw_query = (query or "").strip()
@@ -307,7 +323,7 @@ async def search_candidates(
     douban_hits: list[dict[str, Any]] = []
     sources: dict[str, Any] = {
         "douban": {"ok": False, "count": 0, "error": None, "enabled": douban_enabled and bool(cookie)},
-        "google": {"ok": False, "count": 0, "error": None, "has_api_key": has_google_key},
+        "google": {"ok": False, "count": 0, "error": None, "has_api_key": has_google_key, "enabled": google_on},
     }
 
     google_ot = _usable_original_title(book_original, raw_query)
@@ -317,13 +333,18 @@ async def search_candidates(
         if douban_enabled and cookie
         else None
     )
-    google_task = asyncio.create_task(
-        _search_google_enriched(
-            raw_query=raw_query,
-            original_title=google_ot,
-            isbn=book_isbn,
-            api_key=google_key,
+    google_task = (
+        asyncio.create_task(
+            _search_google_enriched(
+                raw_query=raw_query,
+                original_title=google_ot,
+                isbn=book_isbn,
+                api_key=google_key,
+                proxy=google_proxy,
+            )
         )
+        if google_on
+        else None
     )
 
     if douban_task:
@@ -345,14 +366,24 @@ async def search_candidates(
         authors=match_authors,
     )
 
-    google_hits, google_err, google_query_label = await google_task
-
-    sources["google"] = {
-        "ok": google_err is None,
-        "count": len(google_hits),
-        "error": google_err,
-        "has_api_key": has_google_key,
-    }
+    if google_on and google_task:
+        google_hits, google_err, google_query_label = await google_task
+        sources["google"] = {
+            "ok": google_err is None,
+            "count": len(google_hits),
+            "error": google_err,
+            "has_api_key": has_google_key,
+            "enabled": True,
+        }
+    else:
+        google_hits, google_err, google_query_label = [], None, raw_query
+        sources["google"] = {
+            "ok": False,
+            "count": 0,
+            "error": "Google Books 已禁用",
+            "has_api_key": has_google_key,
+            "enabled": False,
+        }
 
     results = ranked_douban + list(google_hits)
 
@@ -391,15 +422,16 @@ async def fetch_full_metadata(
         return await douban_service.get_book_detail(source_id, cookie)
     if source == "google":
         api_key = _google_api_key(db)
+        proxy = _google_proxy(db)
         try:
-            detail = await google_books_service.get_volume(source_id, api_key=api_key)
+            detail = await google_books_service.get_volume(source_id, api_key=api_key, proxy=proxy)
             if detail:
                 return detail
         except GoogleBooksError as exc:
             logger.warning("Google Books get_volume failed: %s", exc.message)
         # 回退：按提示词再搜一次并匹配 ID
         try:
-            hits = await google_books_service.search(query_hint or source_id, api_key=api_key)
+            hits = await google_books_service.search(query_hint or source_id, api_key=api_key, proxy=proxy)
             for hit in hits:
                 if hit.get("google_books_id") == source_id:
                     return hit
@@ -424,6 +456,8 @@ async def auto_match(
     douban_enabled = _get_config(db, "DOUBAN_ENABLED", "false") == "true"
     cookie = _get_config(db, "DOUBAN_COOKIE", "")
     google_key = _google_api_key(db)
+    google_on = _google_enabled(db)
+    google_proxy = _google_proxy(db)
     parsed = parse_book_title(title, year_hint=year, publisher_hint=publisher)
     book_original = (original_title or "").strip()
 
@@ -439,6 +473,7 @@ async def auto_match(
         str(douban_enabled),
         str(bool(cookie)),
         str(bool(google_key)),
+        str(google_on),
     )
     cached = _cache_get(cache_key)
     if cached is not None:
@@ -456,6 +491,8 @@ async def auto_match(
         douban_enabled=douban_enabled,
         cookie=cookie,
         google_key=google_key,
+        google_on=google_on,
+        google_proxy=google_proxy,
     )
     _cache_set(cache_key, result, _MATCH_TTL)
     return result
@@ -473,6 +510,8 @@ async def _auto_match_uncached(
     douban_enabled: bool,
     cookie: str,
     google_key: str,
+    google_on: bool = True,
+    google_proxy: str = "",
 ) -> Optional[dict[str, Any]]:
     douban_blocked: Optional[douban_service.DoubanRiskControlError] = None
     if douban_enabled and cookie:
@@ -494,19 +533,21 @@ async def _auto_match_uncached(
         except Exception:  # noqa: BLE001
             pass
 
-    try:
-        hits, _err, _label = await _search_google_enriched(
-            raw_query=(title or "").strip(),
-            original_title=original_title,
-            isbn=isbn,
-            api_key=google_key,
-        )
-        if hits:
-            return hits[0]
-    except GoogleBooksError as exc:
-        logger.warning("Google Books auto_match failed: %s", exc.message)
-    except Exception:  # noqa: BLE001
-        pass
+    if google_on:
+        try:
+            hits, _err, _label = await _search_google_enriched(
+                raw_query=(title or "").strip(),
+                original_title=original_title,
+                isbn=isbn,
+                api_key=google_key,
+                proxy=google_proxy,
+            )
+            if hits:
+                return hits[0]
+        except GoogleBooksError as exc:
+            logger.warning("Google Books auto_match failed: %s", exc.message)
+        except Exception:  # noqa: BLE001
+            pass
 
     # 豆瓣被风控且谷歌也无结果时，向上抛出以便前端提示更新 Cookie
     if douban_blocked:

@@ -16,7 +16,6 @@ import BookCard from '../components/BookCard'
 import ConfirmDialog from '../components/ConfirmDialog'
 import GlobalSearchResults from '../components/GlobalSearchResults'
 import HorizontalShelf from '../components/HorizontalShelf'
-import { PageSeg, PageSegItem } from '../components/PageSeg'
 import { useAuth } from '../contexts/AuthContext'
 import { useUISettings } from '../contexts/UISettingsContext'
 import { useTapGuard } from '../hooks/useTapGuard'
@@ -315,22 +314,15 @@ export default function HomePage() {
         </div>
 
         <div className="home-topbar-trailing">
-          <PageSeg aria-label="快捷入口">
-            <PageSegItem
-              icon={<BookOpen size={15} />}
-              label="继续阅读"
-              shortLabel="在读"
-              onClick={() => navigate('/library?status=reading')}
-              title="打开书库并筛选在读书籍"
-            />
-            <PageSegItem
-              primary
-              icon={<Layers size={15} />}
-              label="进入书库"
-              shortLabel="书库"
-              onClick={() => navigate('/library')}
-            />
-          </PageSeg>
+          <button
+            type="button"
+            className="btn btn-primary home-library-entry"
+            onClick={() => navigate('/library')}
+          >
+            <Layers size={15} aria-hidden />
+            <span className="btn-label-full">进入书库</span>
+            <span className="btn-label-short">书库</span>
+          </button>
         </div>
       </div>
 

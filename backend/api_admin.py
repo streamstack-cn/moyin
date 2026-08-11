@@ -28,6 +28,8 @@ settings_router = APIRouter(prefix="/api/settings", tags=["Settings"])
 READER_WHEEL_KEY = "READER_WHEEL_PAGE_TURN"
 LOGIN_COVER_FLOW_KEY = "LOGIN_COVER_FLOW"
 GOOGLE_BOOKS_API_KEY = "GOOGLE_BOOKS_API_KEY"
+GOOGLE_BOOKS_ENABLED_KEY = "GOOGLE_BOOKS_ENABLED"
+GOOGLE_BOOKS_PROXY_KEY = "GOOGLE_BOOKS_PROXY"
 
 
 def _get_config_bool(db: Session, key: str, default: bool = True) -> bool:
@@ -330,7 +332,7 @@ def put_login_settings(
     return {"success": True, "login_cover_flow": payload.login_cover_flow}
 
 
-# ── Google Books API Key ────────────────────────────────────────────────
+# ── Google Books API Key + 开关 + 代理 ────────────────────────────────────
 @settings_router.get("/google-books")
 def get_google_books_settings(db: Session = Depends(get_db), admin: User = Depends(require_admin)):
     row = db.query(AppConfig).filter_by(key=GOOGLE_BOOKS_API_KEY).first()
@@ -339,15 +341,23 @@ def get_google_books_settings(db: Session = Depends(get_db), admin: User = Depen
     masked = ""
     if key:
         masked = key[:4] + "…" + key[-4:] if len(key) > 10 else "****"
+    # enabled 默认 true（向下兼容旧数据库）
+    enabled = _get_config_bool(db, GOOGLE_BOOKS_ENABLED_KEY, default=True)
+    proxy_row = db.query(AppConfig).filter_by(key=GOOGLE_BOOKS_PROXY_KEY).first()
+    proxy = (proxy_row.value if proxy_row else "") or os.environ.get("GOOGLE_BOOKS_PROXY", "") or ""
     return {
         "api_key_set": bool(key) or env_set,
         "api_key_masked": masked,
         "from_env": env_set and not bool(key),
+        "enabled": enabled,
+        "proxy": proxy,
     }
 
 
 class GoogleBooksSettingsPayload(BaseModel):
     api_key: str = ""
+    enabled: bool = True
+    proxy: str = ""
 
 
 @settings_router.put("/google-books")
@@ -358,8 +368,14 @@ def put_google_books_settings(
 ):
     key = (payload.api_key or "").strip()
     _set_config(db, GOOGLE_BOOKS_API_KEY, key)
+    _set_config(db, GOOGLE_BOOKS_ENABLED_KEY, "true" if payload.enabled else "false")
+    _set_config(db, GOOGLE_BOOKS_PROXY_KEY, (payload.proxy or "").strip())
     db.commit()
-    return {"success": True, "api_key_set": bool(key) or bool(os.environ.get("GOOGLE_BOOKS_API_KEY", "").strip())}
+    return {
+        "success": True,
+        "api_key_set": bool(key) or bool(os.environ.get("GOOGLE_BOOKS_API_KEY", "").strip()),
+        "enabled": payload.enabled,
+    }
 
 
 @settings_router.post("/google-books/test")
@@ -367,12 +383,14 @@ async def test_google_books_settings(
     db: Session = Depends(get_db),
     admin: User = Depends(require_admin),
 ):
-    """用当前配置的 API Key 做一次轻量连通性检测。"""
+    """用当前配置的 API Key 和代理做一次轻量连通性检测。"""
     from services import google_books_service
 
     row = db.query(AppConfig).filter_by(key=GOOGLE_BOOKS_API_KEY).first()
     key = (row.value if row else "") or ""
-    return await google_books_service.ping(key)
+    proxy_row = db.query(AppConfig).filter_by(key=GOOGLE_BOOKS_PROXY_KEY).first()
+    proxy = (proxy_row.value if proxy_row else "") or os.environ.get("GOOGLE_BOOKS_PROXY", "") or ""
+    return await google_books_service.ping(key, proxy=proxy)
 
 
 # ── 书库自动 / 定时扫描 ────────────────────────────────────────────────

@@ -7,7 +7,6 @@ import { useTheme } from '../contexts/ThemeContext'
 import { useUISettings } from '../contexts/UISettingsContext'
 import { easeOutExpo, inkRevealVariants, softSpring } from '../lib/motion'
 import { useMediaQuery } from '../lib/useMediaQuery'
-import { APP_VERSION_LABEL } from '../version'
 import ModeToggle from './ModeToggle'
 
 function NavItem({ to, icon, label }: { to: string; icon: ReactNode; label: string }) {

@@ -177,9 +177,6 @@ export default function Layout({
           <div className="brand-text">
             <div className="brand-title-row">
               <div className="brand-title">墨引 MoYin</div>
-              <span className="brand-version" title={`墨引 ${APP_VERSION_LABEL}`}>
-                {APP_VERSION_LABEL}
-              </span>
             </div>
             <div className="brand-subtitle">Reading · Notes · Citations</div>
           </div>

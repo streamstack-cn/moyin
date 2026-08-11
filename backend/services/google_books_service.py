@@ -3,6 +3,7 @@ google_books_service.py — Google Books API 元数据检索
 
 作为豆瓣之外的并行数据源。无 API Key 时匿名配额极低，易返回 429，
 因此支持环境变量 / AppConfig 的 GOOGLE_BOOKS_API_KEY。
+支持通过 AppConfig / 环境变量 GOOGLE_BOOKS_PROXY 配置 HTTP 代理。
 """
 
 from __future__ import annotations
@@ -31,6 +32,11 @@ class GoogleBooksError(Exception):
 
 def resolve_api_key(explicit: str | None = None) -> str:
     return (explicit or os.environ.get("GOOGLE_BOOKS_API_KEY") or "").strip()
+
+
+def resolve_proxy(explicit: str | None = None) -> str:
+    """优先使用显式传入的代理，其次读取环境变量 GOOGLE_BOOKS_PROXY。"""
+    return (explicit or os.environ.get("GOOGLE_BOOKS_PROXY") or "").strip()
 
 
 def _pick_isbn(identifiers: list[dict]) -> str:
@@ -96,7 +102,16 @@ def _friendly_http_error(status: int, has_key: bool) -> str:
     return f"Google Books 请求失败（HTTP {status}）"
 
 
-async def _request_json(params: dict[str, Any], api_key: str = "") -> dict[str, Any]:
+def _build_client(proxy: str = "") -> httpx.AsyncClient:
+    """构建 httpx 异步客户端，可选 HTTP/SOCKS 代理。"""
+    p = resolve_proxy(proxy)
+    kwargs: dict[str, Any] = {"timeout": 20.0, "follow_redirects": True}
+    if p:
+        kwargs["proxy"] = p
+    return httpx.AsyncClient(**kwargs)
+
+
+async def _request_json(params: dict[str, Any], api_key: str = "", proxy: str = "") -> dict[str, Any]:
     key = resolve_api_key(api_key)
     req_params = dict(params)
     if key:
@@ -105,7 +120,7 @@ async def _request_json(params: dict[str, Any], api_key: str = "") -> dict[str, 
     last_err: Optional[GoogleBooksError] = None
     for attempt in range(1, _MAX_ATTEMPTS + 1):
         try:
-            async with httpx.AsyncClient(timeout=20.0, follow_redirects=True) as client:
+            async with _build_client(proxy) as client:
                 resp = await client.get(API_BASE, params=req_params)
         except httpx.TimeoutException as exc:
             last_err = GoogleBooksError("Google Books 请求超时（可能网络不可达）")
@@ -153,6 +168,7 @@ async def search(
     isbn: Optional[str] = None,
     api_key: str = "",
     max_results: int = 10,
+    proxy: str = "",
 ) -> list[dict[str, Any]]:
     q = f"isbn:{isbn}" if isbn else (query or "").strip()
     if not q:
@@ -160,11 +176,12 @@ async def search(
     data = await _request_json(
         {"q": q, "maxResults": max(1, min(max_results, 20)), "printType": "books"},
         api_key=api_key,
+        proxy=proxy,
     )
     return [_normalize(item) for item in data.get("items", []) or []]
 
 
-async def get_volume(volume_id: str, api_key: str = "") -> Optional[dict[str, Any]]:
+async def get_volume(volume_id: str, api_key: str = "", proxy: str = "") -> Optional[dict[str, Any]]:
     vid = (volume_id or "").strip()
     if not vid:
         return None
@@ -176,7 +193,7 @@ async def get_volume(volume_id: str, api_key: str = "") -> Optional[dict[str, An
     last_err: Optional[GoogleBooksError] = None
     for attempt in range(1, _MAX_ATTEMPTS + 1):
         try:
-            async with httpx.AsyncClient(timeout=20.0, follow_redirects=True) as client:
+            async with _build_client(proxy) as client:
                 resp = await client.get(url, params=params)
         except httpx.TimeoutException as exc:
             last_err = GoogleBooksError("Google Books 详情请求超时")
@@ -207,16 +224,17 @@ async def get_volume(volume_id: str, api_key: str = "") -> Optional[dict[str, An
     raise last_err or GoogleBooksError("Google Books 详情请求失败")
 
 
-async def get_by_isbn(isbn: str, api_key: str = "") -> Optional[dict[str, Any]]:
-    results = await search(query="", isbn=isbn, api_key=api_key, max_results=3)
+async def get_by_isbn(isbn: str, api_key: str = "", proxy: str = "") -> Optional[dict[str, Any]]:
+    results = await search(query="", isbn=isbn, api_key=api_key, max_results=3, proxy=proxy)
     return results[0] if results else None
 
 
-async def ping(api_key: str = "") -> dict[str, Any]:
-    """管理页连通性自检：用轻量查询验证 Key/网络。"""
+async def ping(api_key: str = "", proxy: str = "") -> dict[str, Any]:
+    """管理页连通性自检：用轻量查询验证 Key/网络/代理。"""
     key = resolve_api_key(api_key)
     try:
-        hits = await search("python", api_key=key, max_results=1)
+        hits = await search("python", api_key=key, max_results=1, proxy=proxy)
+        proxy_info = f"（代理：{resolve_proxy(proxy)}）" if resolve_proxy(proxy) else ""
         return {
             "ok": True,
             "has_api_key": bool(key),

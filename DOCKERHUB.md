@@ -1,13 +1,11 @@
 # 墨引 MoYin
 
-当前版本：**V0.8**（应用内版本号；Docker 镜像请用 **`latest`**）
-
 **私有化部署的电子书阅读 · 标注 · 引用 · AI 伴读管理系统**
 
 GitHub：https://github.com/streamstack-cn/moyin  
 镜像：`streamstack/moyin:latest`（`linux/amd64` · `linux/arm64`）
 
-统一书库、在线阅读 EPUB / PDF、划词高亮与笔记，把引文整理进「引用篮」并导出带真脚注的 Word 草稿；还可基于高亮 / 笔记 / 引用生成 AI 伴读报告。毛玻璃界面、桌面与移动端一致。适合 NAS / 家庭服务器 / 内网小团队。
+统一书库、在线阅读 EPUB / PDF、划词高亮与笔记，把引文整理进「引用篮」并导出带真脚注的 Word 草稿；还可基于高亮 / 笔记 / 引用生成 AI 伴读报告。
 
 ---
 

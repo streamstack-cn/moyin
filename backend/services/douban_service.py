@@ -343,7 +343,7 @@ def parse_douban_display_name(html: str, user_id: str = "") -> str:
             el.decompose()
         raw = re.sub(r"\s+", " ", h1.get_text(" ", strip=True)).strip()
         raw = re.sub(r"的(豆瓣|主页|小站)$", "", raw).strip()
-        if raw and raw not in ("登录豆瓣", "豆瓣", "豆瓣读书"):
+        if raw and raw not in ("登录豆瓣", "豆瓣", "豆瓣读书", "没有访问权限"):
             return raw
 
     title = soup.select_one("title")
@@ -352,7 +352,7 @@ def parse_douban_display_name(html: str, user_id: str = "") -> str:
         t = re.sub(r"的豆瓣.*$", "", t).strip()
         t = re.split(r"[|｜\-–—]", t, maxsplit=1)[0].strip()
         t = re.sub(r"\s+", " ", t).strip()
-        if t and t not in ("登录豆瓣", "豆瓣", "豆瓣读书"):
+        if t and t not in ("登录豆瓣", "豆瓣", "豆瓣读书", "没有访问权限"):
             return t
     return user_id or ""
 
@@ -380,8 +380,15 @@ async def check_cookie(cookie: str) -> dict[str, Any]:
         }
 
     try:
-        async with httpx.AsyncClient(follow_redirects=True, timeout=15) as client:
-            resp = await client.get(MINE_URL, headers=_probe_headers(normalized))
+        cookies_dict = {
+            k.strip(): v.strip() 
+            for k, v in [item.split("=", 1) for item in normalized.split(";") if "=" in item]
+        }
+        headers = _probe_headers(normalized)
+        headers.pop("Cookie", None) # Let httpx handle cookies to preserve across redirects
+        
+        async with httpx.AsyncClient(follow_redirects=True, timeout=15, cookies=cookies_dict) as client:
+            resp = await client.get(MINE_URL, headers=headers)
     except Exception as exc:  # noqa: BLE001
         return {
             "valid": False,

@@ -866,36 +866,37 @@ function GoogleBooksPanel() {
   const [masked, setMasked] = useState('')
   const [keySet, setKeySet] = useState(false)
   const [fromEnv, setFromEnv] = useState(false)
+  const [enabled, setEnabled] = useState(true)
+  const [proxy, setProxy] = useState('')
   const [saving, setSaving] = useState(false)
   const [testing, setTesting] = useState(false)
   const [testMsg, setTestMsg] = useState('')
+  const [testOk, setTestOk] = useState<boolean | null>(null)
 
   useEffect(() => {
     api
-      .get<{ api_key_set: boolean; api_key_masked: string; from_env: boolean }>('/api/settings/google-books')
+      .get<{ api_key_set: boolean; api_key_masked: string; from_env: boolean; enabled: boolean; proxy: string }>('/api/settings/google-books')
       .then((r) => {
         setKeySet(r.api_key_set)
         setMasked(r.api_key_masked || '')
         setFromEnv(!!r.from_env)
+        setEnabled(r.enabled !== false)  // 默认 true（向下兼容）
+        setProxy(r.proxy || '')
       })
       .catch(() => {})
   }, [])
 
-  async function saveKey() {
+  async function save() {
     setSaving(true)
     try {
-      const r = await api.put<{ success: boolean; api_key_set: boolean }>('/api/settings/google-books', {
+      await api.put('/api/settings/google-books', {
         api_key: apiKey.trim(),
+        enabled,
+        proxy: proxy.trim(),
       })
-      setKeySet(r.api_key_set)
       setApiKey('')
-      toast.success(apiKey.trim() ? 'Google Books API Key 已保存' : '已清除数据库中的 API Key')
-      const status = await api.get<{ api_key_set: boolean; api_key_masked: string; from_env: boolean }>(
-        '/api/settings/google-books',
-      )
-      setKeySet(status.api_key_set)
-      setMasked(status.api_key_masked || '')
-      setFromEnv(!!status.from_env)
+      toast.success('Google Books 设置已保存')
+      // 不重新 fetch，直接用本地 state，避免因远端数据库无该记录时被重置
     } catch (err) {
       toast.error(err instanceof ApiError ? err.message : '保存失败')
     } finally {
@@ -906,17 +907,20 @@ function GoogleBooksPanel() {
   async function testKey() {
     setTesting(true)
     setTestMsg('')
+    setTestOk(null)
     try {
       const r = await api.post<{ ok: boolean; message: string; has_api_key: boolean }>(
         '/api/settings/google-books/test',
         {},
       )
       setTestMsg(r.message || (r.ok ? '可用' : '不可用'))
+      setTestOk(r.ok)
       if (r.ok) toast.success(r.message || 'Google Books 可访问')
       else toast.error(r.message || 'Google Books 不可用')
     } catch (err) {
       const msg = err instanceof ApiError ? err.message : '测试失败'
       setTestMsg(msg)
+      setTestOk(false)
       toast.error(msg)
     } finally {
       setTesting(false)
@@ -926,48 +930,81 @@ function GoogleBooksPanel() {
   return (
     <div>
       <div style={{ fontWeight: 700, marginBottom: 6 }}>Google Books</div>
-      <div style={{ fontSize: 12.5, color: 'var(--ink-faint)', marginBottom: 12, lineHeight: 1.5 }}>
-        未配置密钥时，Google 匹配容易配额不足。若提示 503，多半是 Google 服务/网络暂时不可达，不是 Key 没配好。可在
-        <a
-          href="https://console.cloud.google.com/apis/library/books.googleapis.com"
-          target="_blank"
-          rel="noreferrer"
-          style={{ margin: '0 4px' }}
-        >
-          Google Cloud
-        </a>
-        启用 Books API 并创建密钥后填入下方。
+      <div style={{ fontSize: 12.5, color: 'var(--ink-faint)', marginBottom: 14, lineHeight: 1.6 }}>
+        作为豆瓣之外的补充数据源。<strong>若部署环境无法访问 Google（如群晖 NAS），请关闭此开关</strong>，否则每次匹配都会因 Google 超时而阻塞数十秒，影响豆瓣匹配速度。
       </div>
-      <div style={{ fontSize: 12.5, marginBottom: 10, color: keySet ? 'var(--accent-strong, #1a73e8)' : 'var(--ink-faint)' }}>
-        当前状态：{keySet ? (fromEnv ? '已由部署配置提供' : `已配置（${masked || '****'}）`) : '未配置'}
+
+      {/* 启用开关 — 与豆瓣开关样式统一 */}
+      <div className="settings-switch-group" style={{ marginBottom: 16 }}>
+        <div className="settings-switch-row">
+          <div className="settings-switch-text">
+            <div className="settings-switch-title">启用 Google Books</div>
+            <div className="settings-switch-desc">
+              {enabled ? '开启 — 与豆瓣并行搜索' : '已关闭 — 元数据匹配仅走豆瓣，速度最快'}
+            </div>
+          </div>
+          <LabSwitch checked={enabled} onChange={setEnabled} />
+        </div>
       </div>
-      {testMsg ? (
-        <div style={{ fontSize: 12.5, marginBottom: 10, color: 'var(--ink-faint)', lineHeight: 1.5 }}>{testMsg}</div>
-      ) : null}
-      <div className="field">
-        <label>API Key</label>
-        <input
-          className="input"
-          type="password"
-          autoComplete="off"
-          placeholder={keySet ? '已配置，留空保存可清除；输入新 Key 覆盖' : '粘贴 Google Books API Key'}
-          value={apiKey}
-          onChange={(e) => setApiKey(e.target.value)}
-        />
-      </div>
-      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-        <button className="btn btn-primary" onClick={saveKey} disabled={saving}>
+
+      {enabled && (
+        <>
+          {/* 代理地址 */}
+          <div className="field">
+            <label>HTTP 代理（可选）</label>
+            <input
+              className="input"
+              type="text"
+              placeholder="http://192.168.1.100:7890 或 socks5://..."
+              value={proxy}
+              onChange={(e) => setProxy(e.target.value)}
+            />
+            <div style={{ fontSize: 11.5, color: 'var(--ink-faint)', marginTop: 4, lineHeight: 1.5 }}>
+              部署在无法直连 Google 的环境时填入局域网代理地址。留空则直连。
+            </div>
+          </div>
+
+          {/* API Key */}
+          <div style={{ fontSize: 12.5, color: 'var(--ink-faint)', marginBottom: 8, lineHeight: 1.5 }}>
+            当前 Key：{keySet ? (fromEnv ? '已由部署配置提供' : `已配置（${masked || '****'}）`) : '未配置（匿名配额，不稳定）'}
+          </div>
+          <div className="field">
+            <label>API Key</label>
+            <input
+              className="input"
+              type="password"
+              autoComplete="off"
+              placeholder={keySet ? '已配置，留空保存可清除；输入新 Key 覆盖' : '粘贴 Google Books API Key（可选）'}
+              value={apiKey}
+              onChange={(e) => setApiKey(e.target.value)}
+            />
+            <div style={{ fontSize: 11.5, marginTop: 6, lineHeight: 1.5 }}>
+              <a href="https://developers.google.com/books/docs/v1/using#APIKey" target="_blank" rel="noreferrer" style={{ color: 'var(--brand)', textDecoration: 'none' }}>如何获取 API Key？</a>
+            </div>
+          </div>
+
+          {testMsg ? (
+            <div style={{ fontSize: 12.5, marginBottom: 10, color: testOk ? 'var(--success)' : 'var(--danger)', lineHeight: 1.5 }}>{testMsg}</div>
+          ) : null}
+        </>
+      )}
+
+      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 4 }}>
+        <button className="btn btn-primary" onClick={save} disabled={saving}>
           <Save size={15} />
-          保存 Google API Key
+          保存设置
         </button>
-        <button className="btn" onClick={testKey} disabled={testing || (!keySet && !apiKey.trim())}>
-          <RefreshCw size={15} />
-          {testing ? '测试中…' : '测试连通性'}
-        </button>
+        {enabled && (
+          <button className="btn" onClick={testKey} disabled={testing}>
+            <RefreshCw size={15} />
+            {testing ? '测试中…' : '测试连通性'}
+          </button>
+        )}
       </div>
     </div>
   )
 }
+
 
 interface LibraryScanSettings {
   schedule_enabled: boolean

@@ -88,7 +88,11 @@ function AuthenticatedShell() {
 
   return (
     <>
-      <div className="app-main-layer" hidden={isReader} aria-hidden={isReader}>
+      <div
+        className={`app-main-layer${isReader ? ' is-under-reader' : ''}`}
+        aria-hidden={isReader}
+        inert={isReader ? true : undefined}
+      >
         <Layout displayLocation={mainLocation}>
           <Suspense fallback={<PageFallback />}>
             <Routes location={mainLocation}>
@@ -113,11 +117,13 @@ function AuthenticatedShell() {
         </Layout>
       </div>
       {isReader ? (
-        <Suspense fallback={<PageFallback />}>
-          <Routes>
-            <Route path="/read/:bookId" element={<ReaderPage />} />
-          </Routes>
-        </Suspense>
+        <div className="app-reader-layer">
+          <Suspense fallback={<PageFallback />}>
+            <Routes>
+              <Route path="/read/:bookId" element={<ReaderPage />} />
+            </Routes>
+          </Suspense>
+        </div>
       ) : null}
     </>
   )

@@ -157,9 +157,31 @@ button {
 }
 
 /* ── 布局 ─────────────────────────────────────────────────────────── */
-/* 阅读页覆盖时主界面隐藏但不卸载；保留滚动位置与页面状态 */
-.app-main-layer[hidden] {
-  display: none !important;
+/*
+ * 阅读覆盖时主界面不卸载，且避免 display:none：
+ * iOS 对「display:none 里的 position:fixed」再显示时，安全区/顶栏偶发不重算，
+ * 会出现顶部黑块、内容被挡。改用可见性隐藏 + 阅读层盖住。
+ */
+.app-main-layer {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.app-main-layer.is-under-reader {
+  visibility: hidden;
+  pointer-events: none;
+  user-select: none;
+}
+
+.app-reader-layer {
+  position: fixed;
+  inset: 0;
+  z-index: 400;
+  width: 100%;
+  height: 100%;
+  max-width: 100%;
+  background: var(--bg-0);
+  overscroll-behavior: none;
 }
 
 .app-shell {
@@ -5995,16 +6017,11 @@ mark.search-hit-mark,
   justify-self: stretch;
 }
 
-.home-topbar-trailing .page-seg {
+.home-topbar-trailing .home-library-entry {
   flex-shrink: 0;
   align-self: center;
-  /* 与搜索框同高，框体与主按钮视觉对齐 */
   min-height: 40px;
-}
-
-.home-topbar-trailing .page-seg-item {
-  min-height: 0;
-  flex: 1;
+  gap: 8px;
 }
 
 .home-page {
@@ -6366,15 +6383,8 @@ button.home-snippet-badge-basket:hover {
     width: 100%;
   }
 
-  .home-topbar-trailing .page-seg {
+  .home-topbar-trailing .home-library-entry {
     width: 100%;
-    flex-shrink: 1;
-    flex-wrap: wrap;
-  }
-
-  .home-topbar-trailing .page-seg-item {
-    flex: 1 1 auto;
-    min-width: 0;
     justify-content: center;
   }
 }
@@ -6421,13 +6431,8 @@ button.home-snippet-badge-basket:hover {
     justify-content: stretch;
     width: 100%;
   }
-  .home-topbar-trailing .page-seg {
+  .home-topbar-trailing .home-library-entry {
     width: 100%;
-    flex-wrap: wrap;
-  }
-  .home-topbar-trailing .page-seg-item {
-    flex: 1 1 auto;
-    min-width: 0;
     justify-content: center;
   }
 }
@@ -7611,13 +7616,14 @@ button.stat-strip-item.clickable.active .stat-strip-value {
     gap: 12px;
     padding: calc(10px + constant(safe-area-inset-top, 0px)) 16px 12px;
     padding: calc(10px + env(safe-area-inset-top, 0px)) 16px 12px;
-    /* 去掉生硬分割线：用材质渐隐衔接到内容，更接近 iOS 大标题栏 */
+    /* 底层先铺实色，避免 backdrop-filter 失效时透出「黑洞」；其上再叠毛玻璃 */
     border-bottom: none;
-    background: linear-gradient(
+    background-color: color-mix(in srgb, var(--bg-0) 92%, transparent);
+    background-image: linear-gradient(
       180deg,
       color-mix(in srgb, var(--glass-bg) 96%, transparent) 0%,
       color-mix(in srgb, var(--glass-bg) 88%, transparent) 72%,
-      transparent 100%
+      color-mix(in srgb, var(--bg-0) 55%, transparent) 100%
     );
     backdrop-filter: blur(28px) saturate(190%);
     -webkit-backdrop-filter: blur(28px) saturate(190%);
@@ -7628,9 +7634,18 @@ button.stat-strip-item.clickable.active .stat-strip-value {
     right: 0;
     z-index: 300;
     flex-shrink: 0;
+    min-height: calc(52px + constant(safe-area-inset-top, 0px));
     min-height: calc(52px + env(safe-area-inset-top, 0px));
     pointer-events: auto;
     touch-action: manipulation;
+    transform: translateZ(0);
+    -webkit-backface-visibility: hidden;
+    backface-visibility: hidden;
+  }
+
+  .mobile-topbar.is-chrome-healing {
+    /* 返回阅读后短促触发合成刷新 */
+    filter: brightness(1.001);
   }
 
   .mobile-topbar::after {
@@ -7763,8 +7778,9 @@ button.stat-strip-item.clickable.active .stat-strip-value {
     justify-content: stretch;
   }
 
-  .home-topbar-trailing .page-seg {
+  .home-topbar-trailing .home-library-entry {
     width: 100%;
+    justify-content: center;
   }
 
   .page-heading,

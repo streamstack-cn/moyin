@@ -209,7 +209,7 @@ services:
 ## 镜像
 
 - Docker Hub：[`streamstack/moyin`](https://hub.docker.com/r/streamstack/moyin)
-- 镜像标签：请使用 **`latest`**（与应用内 `V0.8` 对应）
+- 镜像标签：请使用 **`latest`**（与应用内 `V0.81` 对应）
 - 平台：`linux/amd64`、`linux/arm64`（Intel / Apple Silicon / 常见 NAS 均可）
 - 内含：Nginx + FastAPI + Calibre + LibreOffice Writer
 

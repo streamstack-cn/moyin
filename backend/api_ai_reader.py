@@ -26,6 +26,7 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import json_repair
 from typing import List
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -889,7 +890,7 @@ async def generate_report_stream(
                 clean = complete.strip()
                 if clean.startswith("```"):
                     clean = clean.split("\n", 1)[-1].rsplit("```", 1)[0].strip()
-                report_data = json.loads(clean)
+                report_data = json_repair.loads(clean)
             except Exception:
                 report_data = {"raw": complete}
 

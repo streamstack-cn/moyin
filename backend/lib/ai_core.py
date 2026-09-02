@@ -299,10 +299,11 @@ async def _balance_siliconflow(api_key: str) -> Optional[dict]:
                 "charged_balance": charged,
                 "free_balance": free,
             }
+        _raise_ai_error(resp)
     except Exception as e:
+        if isinstance(e, RuntimeError): raise e
         logger.debug(f"硅基流动余额查询失败: {e}")
-    return None
-
+        raise RuntimeError(f"硅基流动余额查询失败: {e}")
 
 async def _balance_deepseek(api_key: str) -> Optional[dict]:
     try:
@@ -319,10 +320,11 @@ async def _balance_deepseek(api_key: str) -> Optional[dict]:
                 "total_balance": float(info.get("total_balance", 0) or 0),
                 "available_balance": float(info.get("available_balance", 0) or 0),
             }
+        _raise_ai_error(resp)
     except Exception as e:
+        if isinstance(e, RuntimeError): raise e
         logger.debug(f"DeepSeek 余额查询失败: {e}")
-    return None
-
+        raise RuntimeError(f"DeepSeek 余额查询失败: {e}")
 
 async def _balance_kimi(api_key: str) -> Optional[dict]:
     try:
@@ -338,9 +340,11 @@ async def _balance_kimi(api_key: str) -> Optional[dict]:
                 "total_balance": float(data.get("total_balance", 0) or 0),
                 "available_balance": float(data.get("available_balance", 0) or 0),
             }
+        _raise_ai_error(resp)
     except Exception as e:
+        if isinstance(e, RuntimeError): raise e
         logger.debug(f"Kimi 余额查询失败: {e}")
-    return None
+        raise RuntimeError(f"Kimi 余额查询失败: {e}")
 
 
 def _raise_ai_error(resp: httpx.Response) -> None:

@@ -802,6 +802,9 @@ async def get_report(
         "book_ids": json.loads(report.book_ids),
         "report": report_data,
         "chat_history": chat,
+        "auto_save_chat": getattr(report, "auto_save_chat", True),
+        "version": report.version,
+        "updated_at": report.updated_at.isoformat() if report.updated_at else None,
         "generated_at": report.generated_at.isoformat() if report.generated_at else None,
     }
 
@@ -994,6 +997,8 @@ async def list_reports(user: User = Depends(get_current_user), db: Session = Dep
             "id": r.id,
             "book_ids": b_ids,
             "books": [{"id": b.id, "title": b.title, "cover": f"/api/books/{b.id}/cover" if b.cover_path else None} for b in books],
+            "version": r.version,
+            "updated_at": r.updated_at.isoformat() if r.updated_at else None,
             "generated_at": r.generated_at.isoformat() if r.generated_at else None,
         })
     return res
@@ -1072,3 +1077,120 @@ async def get_chat_history(
         messages = []
     return {"messages": messages}
 
+class AutoSaveUpdate(BaseModel):
+    auto_save_chat: bool
+
+@router.patch("/report/{report_id}/auto-save-chat")
+async def update_auto_save_chat(
+    report_id: str,
+    req: AutoSaveUpdate,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    report = db.query(AiReadingReport).filter(
+        AiReadingReport.id == report_id,
+        AiReadingReport.user_id == user.id,
+    ).first()
+    if not report:
+        raise HTTPException(404, "报告不存在")
+    report.auto_save_chat = req.auto_save_chat
+    db.commit()
+    return {"ok": True}
+
+def _build_evolve_system_prompt(cfg):
+    parts = _build_persona_lines(cfg) + [
+        "",
+        "核心任务：",
+        "这里有一份你之前生成的结构化阅读报告，以及读者在此基础上与你进行的探讨对话。",
+        "请你像一位严谨的编辑，把对话中产生的新见解、新结论，无缝融入到原有报告的各个模块中（如核心收获、个人思考、知识关联等）。",
+        "要求：",
+        "1. 保持原有报告的深度与语气。",
+        "2. 必须严格遵守原始报告的 JSON 格式输出，不要破坏未涉及部分的原始信息。",
+        "3. 只输出合并后的最新 JSON，不要输出任何其他内容。"
+    ]
+    return "\n".join(parts)
+
+def _build_evolve_user_prompt(report_json, chat_messages):
+    report_str = json.dumps(report_json, ensure_ascii=False, indent=2)
+    chat_str = "\n".join([f"[{m.get('role')}]: {m.get('content')}" for m in chat_messages])
+    return (
+        "【原始报告 JSON】\n"
+        f"{report_str}\n\n"
+        "【探讨对话历史】\n"
+        f"{chat_str}\n\n"
+        "请结合以上对话，输出升级后的 JSON 报告："
+    )
+
+@router.post("/report/{report_id}/evolve/stream")
+async def evolve_report_stream(
+    report_id: str,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """流式升级报告，将对话融入原报告"""
+    report = db.query(AiReadingReport).filter(
+        AiReadingReport.id == report_id,
+        AiReadingReport.user_id == user.id,
+    ).first()
+    if not report:
+        raise HTTPException(404, "报告不存在")
+
+    try:
+        report_data = json.loads(report.report_json)
+    except Exception:
+        raise HTTPException(400, "原报告格式错误，无法升级")
+
+    try:
+        chat_messages = json.loads(report.chat_history or "[]")
+    except Exception:
+        chat_messages = []
+
+    if not chat_messages:
+        raise HTTPException(400, "没有对话历史，无需升级")
+
+    cfg = _get_or_create_config(user.id, db)
+    ai_cfg = _require_ai_config(cfg)
+
+    system_prompt = _build_evolve_system_prompt(cfg)
+    user_prompt = _build_evolve_user_prompt(report_data, chat_messages)
+    messages = [{"role": "user", "content": user_prompt}]
+
+    full_content: list[str] = []
+
+    async def event_generator():
+        try:
+            async for chunk in chat_completion_stream(messages, ai_cfg, system_prompt):
+                full_content.append(chunk)
+                yield f"data: {json.dumps({'content': chunk}, ensure_ascii=False)}\n\n"
+
+            complete = "".join(full_content)
+            try:
+                clean = complete.strip()
+                if clean.startswith("```"):
+                    clean = clean.split("\n", 1)[-1].rsplit("```", 1)[0].strip()
+                new_report_data = json_repair.loads(clean)
+            except Exception:
+                new_report_data = {"raw": complete}
+
+            # 重新查一下报告避免会话过期
+            db_report = db.query(AiReadingReport).filter(AiReadingReport.id == report_id).first()
+            if db_report:
+                db_report.report_json = json.dumps(new_report_data, ensure_ascii=False)
+                db_report.chat_history = "[]" # 清空已融入的对话
+                db_report.version = (db_report.version or 1) + 1
+                from datetime import datetime
+                db_report.updated_at = datetime.utcnow()
+                db.commit()
+
+            yield "data: [DONE]\n\n"
+        except Exception as e:
+            err = str(e)
+            logger.error(f"[AI伴读] 升级报告失败: {err}")
+            yield f"data: {json.dumps({'error': err}, ensure_ascii=False)}\n\n"
+            yield "data: [DONE]\n\n"
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )

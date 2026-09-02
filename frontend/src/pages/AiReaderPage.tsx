@@ -350,6 +350,10 @@ function ReportView({
   onRetry,
   onDismissInterrupt,
   onSaved,
+  chatHistory = [],
+  version,
+  updatedAt,
+  onEvolved,
 }: {
   report: AiReportContent | null
   reportId: string | null
@@ -360,19 +364,26 @@ function ReportView({
   onRetry: () => void
   onDismissInterrupt?: () => void
   onSaved?: (newReport: AiReportContent) => void
+  chatHistory?: { role: string; content: string }[]
+  version?: number
+  updatedAt?: string | null
+  onEvolved?: (newReport: AiReportContent, newVersion: number, newUpdatedAt: string) => void
 }) {
   const [isEditing, setIsEditing] = useState(false)
   const [editForm, setEditForm] = useState<AiReportContent | null>(null)
   const [saving, setSaving] = useState(false)
+  const [evolving, setEvolving] = useState(false)
+  const [evolveChars, setEvolveChars] = useState(0)
 
   useEffect(() => {
     if (!isEditing && report) setEditForm(report)
   }, [report, isEditing])
 
-  if (streaming) {
+  if (streaming || evolving) {
     return (
       <div className="glass-panel ai-streaming-panel">
-        <StreamingText chars={streamedChars} phase={phase} />
+        <StreamingText chars={evolving ? evolveChars : streamedChars} phase={evolving ? 'thinking' : phase} />
+        {evolving && <div style={{ marginTop: 12, fontSize: 13, color: 'var(--ink-faint)', textAlign: 'center' }}>正在融入对话洞察，升级报告中...</div>}
       </div>
     )
   }
@@ -418,6 +429,58 @@ function ReportView({
     setSaving(false)
   }
 
+  const handleEvolve = async () => {
+    if (!reportId) return
+    setEvolving(true)
+    setEvolveChars(0)
+    try {
+      const res = await fetch(`/api/ai-reader/report/${reportId}/evolve/stream`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${localStorage.getItem('token')}`,
+        }
+      })
+      if (!res.ok) throw new Error('网络请求失败')
+      const reader = res.body?.getReader()
+      if (!reader) throw new Error('无法读取流')
+      const decoder = new TextDecoder()
+      let totalChars = 0
+
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+        const chunk = decoder.decode(value, { stream: true })
+        const lines = chunk.split('\n')
+        for (const line of lines) {
+          if (line.startsWith('data: ')) {
+            const dataStr = line.slice(6)
+            if (dataStr === '[DONE]') break
+            try {
+              const data = JSON.parse(dataStr)
+              if (data.error) throw new Error(data.error)
+              if (data.content) {
+                totalChars += data.content.length
+                setEvolveChars(totalChars)
+              }
+            } catch (e) {}
+          }
+        }
+      }
+
+      // 升级完成，重新拉取最新报告
+      const updated = await api.get<AiReport>(`/api/ai-reader/report?book_ids=${report.book_ids || '[]'}`)
+      if (updated && updated.report) {
+        toast.success('报告升级成功！')
+        onEvolved?.(updated.report, updated.version || 1, updated.updated_at || '')
+      }
+    } catch (e: any) {
+      toast.error(e.message || '升级失败')
+    } finally {
+      setEvolving(false)
+    }
+  }
+
   const sections = [
     { key: 'content_summary' as keyof AiReportContent, icon: <BookOpen size={15} />, title: '内容概括', kicker: '开篇' },
     { key: 'core_insights' as keyof AiReportContent, icon: <Zap size={15} />, title: '核心收获', kicker: '收获' },
@@ -433,24 +496,50 @@ function ReportView({
     return Boolean(renderReportValue(raw))
   })
 
+  // 格式化时间
+  let formattedDate = ''
+  if (updatedAt) {
+    try {
+      const d = new Date(updatedAt)
+      formattedDate = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
+    } catch {}
+  }
+
   return (
     <article className="ai-report-folio">
       {!streaming && reportId && (
-        <div className="ai-report-actions">
-          {isEditing ? (
-            <>
-              <button type="button" className="btn btn-sm" onClick={() => setIsEditing(false)} disabled={saving}>
-                取消
-              </button>
-              <button type="button" className="btn btn-primary btn-sm" onClick={handleSave} disabled={saving}>
-                <Save size={12} /> {saving ? '保存中…' : '保存修改'}
-              </button>
-            </>
-          ) : (
-            <button type="button" className="btn btn-sm" onClick={() => setIsEditing(true)}>
-              <PenLine size={12} /> 编辑报告
-            </button>
-          )}
+        <div className="ai-report-actions" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <div className="ai-report-version-badge" style={{ fontSize: 12, color: 'var(--ink-faint)', display: 'flex', alignItems: 'center', gap: 6 }}>
+            {version && version > 1 && (
+              <span style={{ background: 'var(--surface-sunken)', padding: '2px 6px', borderRadius: 4, fontWeight: 500 }}>
+                🏷️ 第 {version} 版
+              </span>
+            )}
+            {formattedDate && <span>更新于 {formattedDate}</span>}
+          </div>
+          <div style={{ display: 'flex', gap: 8 }}>
+            {isEditing ? (
+              <>
+                <button type="button" className="btn btn-sm" onClick={() => setIsEditing(false)} disabled={saving}>
+                  取消
+                </button>
+                <button type="button" className="btn btn-primary btn-sm" onClick={handleSave} disabled={saving}>
+                  <Save size={12} /> {saving ? '保存中…' : '保存修改'}
+                </button>
+              </>
+            ) : (
+              <>
+                {chatHistory.length > 0 && (
+                  <button type="button" className="btn btn-sm" onClick={handleEvolve} style={{ color: 'var(--accent)', borderColor: 'var(--accent-faint)', background: 'var(--accent-wash)' }}>
+                    <Sparkles size={12} /> AI 升级报告
+                  </button>
+                )}
+                <button type="button" className="btn btn-sm" onClick={() => setIsEditing(true)}>
+                  <PenLine size={12} /> 编辑报告
+                </button>
+              </>
+            )}
+          </div>
         </div>
       )}
 
@@ -918,24 +1007,24 @@ function AiSettingsModal({
   )
 }
 
-function ChatPanel({ bookIds, hasReport, reportId, initialMessages }: {
+function ChatPanel({ bookIds, hasReport, reportId, initialMessages, autoSaveInitial = true }: {
   bookIds: string[]
   hasReport: boolean
   reportId: string | null
   initialMessages?: { role: string; content: string }[]
+  autoSaveInitial?: boolean
 }) {
   const [messages, setMessages] = useState<{ role: string; content: string }[]>(initialMessages || [])
   const [input, setInput] = useState('')
   const [sending, setSending] = useState(false)
-  const [saving, setSaving] = useState(false)
-  const [dirty, setDirty] = useState(false)  // 对话内容是否有未保存的变更
+  const [autoSave, setAutoSave] = useState(autoSaveInitial)
   const bottomRef = useRef<HTMLDivElement>(null)
 
   // 当 initialMessages 变化时（切换报告），重置对话
   useEffect(() => {
     setMessages(initialMessages || [])
-    setDirty(false)
-  }, [reportId])
+    setAutoSave(autoSaveInitial)
+  }, [reportId, autoSaveInitial])
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
@@ -948,31 +1037,44 @@ function ChatPanel({ bookIds, hasReport, reportId, initialMessages }: {
     setInput('')
     setMessages((prev) => [...prev, userMsg])
     setSending(true)
-    setDirty(true)
+    let newMessages = [...messages, userMsg]
     try {
       const res = await api.post<{ content: string }>('/api/ai-reader/chat', {
         book_ids: bookIds,
-        messages: [...messages, userMsg],
+        messages: newMessages,
       })
-      setMessages((prev) => [...prev, { role: 'assistant', content: res.content }])
+      const asstMsg = { role: 'assistant', content: res.content }
+      newMessages = [...newMessages, asstMsg]
+      setMessages((prev) => [...prev, asstMsg])
     } catch (e: unknown) {
       setMessages((prev) => [...prev, { role: 'assistant', content: `⚠️ ${(e as Error)?.message || '请求失败'}` }])
     } finally {
       setSending(false)
     }
+
+    // 自动保存逻辑
+    if (autoSave && reportId) {
+      try {
+        await api.put(`/api/ai-reader/report/${reportId}/chat`, { messages: newMessages })
+      } catch (e) {
+        console.error('自动保存对话失败', e)
+      }
+    }
   }
 
-  async function saveChat() {
-    if (!reportId || messages.length === 0 || saving) return
-    setSaving(true)
+  async function toggleAutoSave() {
+    if (!reportId) return
+    const nextVal = !autoSave
+    setAutoSave(nextVal)
     try {
-      await api.put(`/api/ai-reader/report/${reportId}/chat`, { messages })
-      setDirty(false)
-      toast.success('对话已保留')
+      await api.patch(`/api/ai-reader/report/${reportId}/auto-save-chat`, { auto_save_chat: nextVal })
+      if (nextVal && messages.length > 0) {
+        // 开启自动保存时，顺便把当前内存里的对话存一下
+        await api.put(`/api/ai-reader/report/${reportId}/chat`, { messages })
+      }
     } catch {
-      toast.error('保存对话失败')
-    } finally {
-      setSaving(false)
+      toast.error('设置失败')
+      setAutoSave(!nextVal)
     }
   }
 
@@ -982,11 +1084,15 @@ function ChatPanel({ bookIds, hasReport, reportId, initialMessages }: {
 
   return (
     <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.3 }} className="glass-panel ai-chat-panel">
-      <div className="ai-chat-head">
+      <div className="ai-chat-head" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
         <MessageSquare size={14} />
-        <span>追问 AI</span>
-        {messages.length > 0 && dirty && (
-          <span style={{ fontSize: 11, color: 'var(--ink-faint)', marginLeft: 'auto' }}>未保存</span>
+        <span style={{ flex: 1 }}>追问 AI</span>
+        
+        {reportId && (
+          <label className="checkbox-label" style={{ display: 'flex', alignItems: 'center', gap: 4, cursor: 'pointer', fontSize: 12, color: 'var(--ink-faint)' }}>
+            <input type="checkbox" checked={autoSave} onChange={toggleAutoSave} />
+            保留对话
+          </label>
         )}
       </div>
 
@@ -1036,17 +1142,7 @@ function ChatPanel({ bookIds, hasReport, reportId, initialMessages }: {
           placeholder="继续提问…"
           style={{ flex: 1, height: 36 }}
         />
-        <button
-          type="button"
-          className="btn btn-sm"
-          onClick={saveChat}
-          disabled={saving || sending || messages.length === 0 || !reportId || !dirty}
-          title="保留对话到当前报告"
-          style={{ height: 36, padding: '0 12px', gap: 4 }}
-        >
-          <Save size={13} />
-          {saving ? '保存中…' : '保留对话'}
-        </button>
+
         <button type="button" className="btn btn-primary btn-magnetic" onClick={() => send()} disabled={sending || !input.trim()} style={{ height: 36, padding: '0 16px' }}>
           发送
         </button>
@@ -1085,6 +1181,9 @@ function AiReaderPage() {
   const [report, setReport] = useState<AiReportContent | null>(() => getAiGenerateSession().report)
   const [reportId, setReportId] = useState<string | null>(() => getAiGenerateSession().reportId)
   const [reportGenAt, setReportGenAt] = useState<string | null>(() => getAiGenerateSession().reportGenAt)
+  const [reportVersion, setReportVersion] = useState<number | undefined>()
+  const [reportUpdatedAt, setReportUpdatedAt] = useState<string | null>(null)
+  const [reportAutoSaveChat, setReportAutoSaveChat] = useState<boolean>(true)
   const [chatHistory, setChatHistory] = useState<{ role: string; content: string }[]>([])
   const [config, setConfig] = useState<AiConfig | null>(null)
   const [providers, setProviders] = useState<AiProvider[]>([])
@@ -1203,6 +1302,9 @@ function AiReaderPage() {
       setReport(null)
       setReportId(null)
       setReportGenAt(null)
+      setReportVersion(undefined)
+      setReportUpdatedAt(null)
+      setReportAutoSaveChat(true)
       setChatHistory([])
       return
     }
@@ -1229,11 +1331,17 @@ function AiReaderPage() {
           setReport(r.report)
           setReportId(r.id)
           setReportGenAt(r.generated_at)
+          setReportVersion(r.version)
+          setReportUpdatedAt(r.updated_at || null)
+          setReportAutoSaveChat(r.auto_save_chat ?? true)
           setChatHistory(r.chat_history || [])
         } else {
           setReport(null)
           setReportId(null)
           setReportGenAt(null)
+          setReportVersion(undefined)
+          setReportUpdatedAt(null)
+          setReportAutoSaveChat(true)
           setChatHistory([])
         }
       })
@@ -1488,7 +1596,7 @@ function AiReaderPage() {
                 </div>
               )}
 
-              <ChatPanel bookIds={selectedIds} hasReport={hasReport} reportId={reportId} initialMessages={chatHistory} />
+              <ChatPanel bookIds={selectedIds} hasReport={hasReport} reportId={reportId} initialMessages={chatHistory} autoSaveInitial={reportAutoSaveChat} />
               <ReportView
                 report={report}
                 reportId={reportId}
@@ -1499,6 +1607,15 @@ function AiReaderPage() {
                 onRetry={() => void retryGenerate()}
                 onDismissInterrupt={dismissInterrupt}
                 onSaved={(r) => setReport(r)}
+                chatHistory={chatHistory}
+                version={reportVersion}
+                updatedAt={reportUpdatedAt}
+                onEvolved={(r, v, u) => {
+                  setReport(r)
+                  setReportVersion(v)
+                  setReportUpdatedAt(u)
+                  setChatHistory([])
+                }}
               />
             </div>
           </div>

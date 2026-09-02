@@ -289,4 +289,7 @@ class AiReadingReport(Base):
     book_ids_hash = Column(String(64), index=True)   # SHA256(sorted book_ids) 快速查重
     report_json = Column(Text, default="{}")     # 6 大模块的结构化内容
     chat_history = Column(Text, default="[]")     # 追问对话 JSON 数组 [{"role":"user","content":"..."},...]
+    auto_save_chat = Column(Boolean, default=True) # 是否自动保存对话
+    version = Column(Integer, default=1)          # 报告版本（随对话进化而递增）
     generated_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)

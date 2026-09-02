@@ -360,6 +360,9 @@ export interface AiReport {
   book_ids: string[]
   report: AiReportContent
   chat_history?: { role: string; content: string }[]
+  auto_save_chat?: boolean
+  version?: number
+  updated_at?: string
   generated_at: string
 }
 

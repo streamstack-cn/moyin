@@ -359,6 +359,7 @@ export interface AiReport {
   id: string
   book_ids: string[]
   report: AiReportContent
+  chat_history?: { role: string; content: string }[]
   generated_at: string
 }
 

@@ -918,15 +918,26 @@ function AiSettingsModal({
   )
 }
 
-function ChatPanel({ bookIds, hasReport }: { bookIds: string[]; hasReport: boolean }) {
-  const [messages, setMessages] = useState<{ role: string; content: string }[]>([])
+function ChatPanel({ bookIds, hasReport, reportId, initialMessages }: {
+  bookIds: string[]
+  hasReport: boolean
+  reportId: string | null
+  initialMessages?: { role: string; content: string }[]
+}) {
+  const [messages, setMessages] = useState<{ role: string; content: string }[]>(initialMessages || [])
   const [input, setInput] = useState('')
   const [sending, setSending] = useState(false)
+  const [saving, setSaving] = useState(false)
+  const [dirty, setDirty] = useState(false)  // 对话内容是否有未保存的变更
   const bottomRef = useRef<HTMLDivElement>(null)
 
+  // 当 initialMessages 变化时（切换报告），重置对话
   useEffect(() => {
-    // block: 'nearest' 只在离它最近的可滚动祖先（聊天消息列表自身）内滚动，
-    // 不会像默认的 block: 'start' 那样一路向上传播、把外层页面也带着滚动。
+    setMessages(initialMessages || [])
+    setDirty(false)
+  }, [reportId])
+
+  useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
   }, [messages])
 
@@ -937,6 +948,7 @@ function ChatPanel({ bookIds, hasReport }: { bookIds: string[]; hasReport: boole
     setInput('')
     setMessages((prev) => [...prev, userMsg])
     setSending(true)
+    setDirty(true)
     try {
       const res = await api.post<{ content: string }>('/api/ai-reader/chat', {
         book_ids: bookIds,
@@ -950,6 +962,20 @@ function ChatPanel({ bookIds, hasReport }: { bookIds: string[]; hasReport: boole
     }
   }
 
+  async function saveChat() {
+    if (!reportId || messages.length === 0 || saving) return
+    setSaving(true)
+    try {
+      await api.put(`/api/ai-reader/report/${reportId}/chat`, { messages })
+      setDirty(false)
+      toast.success('对话已保留')
+    } catch {
+      toast.error('保存对话失败')
+    } finally {
+      setSaving(false)
+    }
+  }
+
   if (!hasReport) return null
 
   const quickPrompts = ['帮我提炼一下核心观点', '书中的结论有何争议？', '根据我的高亮，你觉得我对哪部分最感兴趣？']
@@ -959,6 +985,9 @@ function ChatPanel({ bookIds, hasReport }: { bookIds: string[]; hasReport: boole
       <div className="ai-chat-head">
         <MessageSquare size={14} />
         <span>追问 AI</span>
+        {messages.length > 0 && dirty && (
+          <span style={{ fontSize: 11, color: 'var(--ink-faint)', marginLeft: 'auto' }}>未保存</span>
+        )}
       </div>
 
       <div className="ai-chat-messages">
@@ -1007,6 +1036,17 @@ function ChatPanel({ bookIds, hasReport }: { bookIds: string[]; hasReport: boole
           placeholder="继续提问…"
           style={{ flex: 1, height: 36 }}
         />
+        <button
+          type="button"
+          className="btn btn-sm"
+          onClick={saveChat}
+          disabled={saving || sending || messages.length === 0 || !reportId || !dirty}
+          title="保留对话到当前报告"
+          style={{ height: 36, padding: '0 12px', gap: 4 }}
+        >
+          <Save size={13} />
+          {saving ? '保存中…' : '保留对话'}
+        </button>
         <button type="button" className="btn btn-primary btn-magnetic" onClick={() => send()} disabled={sending || !input.trim()} style={{ height: 36, padding: '0 16px' }}>
           发送
         </button>
@@ -1045,6 +1085,7 @@ function AiReaderPage() {
   const [report, setReport] = useState<AiReportContent | null>(() => getAiGenerateSession().report)
   const [reportId, setReportId] = useState<string | null>(() => getAiGenerateSession().reportId)
   const [reportGenAt, setReportGenAt] = useState<string | null>(() => getAiGenerateSession().reportGenAt)
+  const [chatHistory, setChatHistory] = useState<{ role: string; content: string }[]>([])
   const [config, setConfig] = useState<AiConfig | null>(null)
   const [providers, setProviders] = useState<AiProvider[]>([])
   const [loadingBooks, setLoadingBooks] = useState(true)
@@ -1162,6 +1203,7 @@ function AiReaderPage() {
       setReport(null)
       setReportId(null)
       setReportGenAt(null)
+      setChatHistory([])
       return
     }
     api.get<AiMaterial[]>(`/api/ai-reader/material?book_ids=${ids}`).then(setMaterials).catch(() => {})
@@ -1187,10 +1229,12 @@ function AiReaderPage() {
           setReport(r.report)
           setReportId(r.id)
           setReportGenAt(r.generated_at)
+          setChatHistory(r.chat_history || [])
         } else {
           setReport(null)
           setReportId(null)
           setReportGenAt(null)
+          setChatHistory([])
         }
       })
       .catch(() => {})
@@ -1444,7 +1488,7 @@ function AiReaderPage() {
                 </div>
               )}
 
-              <ChatPanel bookIds={selectedIds} hasReport={hasReport} />
+              <ChatPanel bookIds={selectedIds} hasReport={hasReport} reportId={reportId} initialMessages={chatHistory} />
               <ReportView
                 report={report}
                 reportId={reportId}

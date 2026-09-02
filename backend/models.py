@@ -288,4 +288,5 @@ class AiReadingReport(Base):
     book_ids = Column(Text, default="[]")       # JSON 数组，如 ["id1","id2"]
     book_ids_hash = Column(String(64), index=True)   # SHA256(sorted book_ids) 快速查重
     report_json = Column(Text, default="{}")     # 6 大模块的结构化内容
+    chat_history = Column(Text, default="[]")     # 追问对话 JSON 数组 [{"role":"user","content":"..."},...]
     generated_at = Column(DateTime, default=datetime.utcnow)

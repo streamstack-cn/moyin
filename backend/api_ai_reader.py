@@ -793,10 +793,15 @@ async def get_report(
         report_data = json.loads(report.report_json)
     except Exception:
         report_data = {}
+    try:
+        chat = json.loads(report.chat_history or "[]")
+    except Exception:
+        chat = []
     return {
         "id": report.id,
         "book_ids": json.loads(report.book_ids),
         "report": report_data,
+        "chat_history": chat,
         "generated_at": report.generated_at.isoformat() if report.generated_at else None,
     }
 
@@ -1019,3 +1024,51 @@ async def delete_report_by_id(
     db.delete(report)
     db.commit()
     return {"success": True}
+
+
+# ── 对话历史 ─────────────────────────────────────────────────────────────────
+
+class ChatHistoryUpdate(BaseModel):
+    messages: List[dict]  # [{"role": "user"|"assistant", "content": "..."}]
+
+
+@router.put("/report/{report_id}/chat")
+async def save_chat_history(
+    report_id: str,
+    req: ChatHistoryUpdate,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """保存追问对话到对应报告。"""
+    report = db.query(AiReadingReport).filter(
+        AiReadingReport.id == report_id,
+        AiReadingReport.user_id == user.id,
+    ).first()
+    if not report:
+        raise HTTPException(404, "报告不存在")
+    # 只保留 role + content，过滤掉前端可能传入的多余字段
+    clean = [{"role": m.get("role", "user"), "content": m.get("content", "")} for m in req.messages]
+    report.chat_history = json.dumps(clean, ensure_ascii=False)
+    db.commit()
+    return {"ok": True}
+
+
+@router.get("/report/{report_id}/chat")
+async def get_chat_history(
+    report_id: str,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """读取报告关联的追问对话。"""
+    report = db.query(AiReadingReport).filter(
+        AiReadingReport.id == report_id,
+        AiReadingReport.user_id == user.id,
+    ).first()
+    if not report:
+        raise HTTPException(404, "报告不存在")
+    try:
+        messages = json.loads(report.chat_history or "[]")
+    except Exception:
+        messages = []
+    return {"messages": messages}
+

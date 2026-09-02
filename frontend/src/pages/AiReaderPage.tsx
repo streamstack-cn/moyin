@@ -353,7 +353,6 @@ function ReportView({
   chatHistory = [],
   version,
   updatedAt,
-  onEvolved,
 }: {
   report: AiReportContent | null
   reportId: string | null
@@ -1629,12 +1628,6 @@ function AiReaderPage() {
                 chatHistory={chatHistory}
                 version={reportVersion}
                 updatedAt={reportUpdatedAt}
-                onEvolved={(r, v, u) => {
-                  setReport(r)
-                  setReportVersion(v)
-                  setReportUpdatedAt(u)
-                  setChatHistory([])
-                }}
               />
             </div>
           </div>

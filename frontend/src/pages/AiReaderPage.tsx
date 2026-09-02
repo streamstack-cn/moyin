@@ -434,14 +434,24 @@ function ReportView({
     setEvolving(true)
     setEvolveChars(0)
     try {
+      const token = getToken()
       const res = await fetch(`/api/ai-reader/report/${reportId}/evolve/stream`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          Authorization: `Bearer ${localStorage.getItem('token')}`,
+          Authorization: `Bearer ${token}`,
         }
       })
-      if (!res.ok) throw new Error('网络请求失败')
+      if (!res.ok) {
+        let errText = '网络请求失败'
+        try {
+          const errJson = await res.json()
+          errText = errJson.detail || errJson.message || errText
+        } catch (e) {
+          errText = `网络请求失败 (${res.status})`
+        }
+        throw new Error(errText)
+      }
       const reader = res.body?.getReader()
       if (!reader) throw new Error('无法读取流')
       const decoder = new TextDecoder()

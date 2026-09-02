@@ -277,7 +277,7 @@ function MaterialPanel({
  * 干净的加载动画 + 阶段性文案，字数仍在悄悄增长但只用于内部换算「进度」，
  * 不直接展示原文。
  */
-function StreamingText({ chars, phase }: { chars: number; phase: AiGeneratePhase }) {
+function StreamingText({ chars, phase, customHint }: { chars: number; phase: AiGeneratePhase; customHint?: string }) {
   const stage = phaseLabel(phase, chars)
   const steps: { key: AiGeneratePhase; label: string }[] = [
     { key: 'collecting', label: '收集素材' },
@@ -305,7 +305,7 @@ function StreamingText({ chars, phase }: { chars: number; phase: AiGeneratePhase
       </div>
       <div className="ai-generating-hint">
         {chars > 0 ? `已输出约 ${chars} 字 · ` : ''}
-        篇幅较长或选中全文分析时可能需要一点时间，可随时点击「停止生成」
+        {customHint || '篇幅较长或选中全文分析时可能需要一点时间，可随时点击「停止生成」'}
       </div>
     </div>
   )
@@ -367,13 +367,13 @@ function ReportView({
   chatHistory?: { role: string; content: string }[]
   version?: number
   updatedAt?: string | null
-  onEvolved?: (newReport: AiReportContent, newVersion: number, newUpdatedAt: string) => void
 }) {
   const [isEditing, setIsEditing] = useState(false)
   const [editForm, setEditForm] = useState<AiReportContent | null>(null)
   const [saving, setSaving] = useState(false)
   const [evolving, setEvolving] = useState(false)
   const [evolveChars, setEvolveChars] = useState(0)
+  const evolveAbortCtrl = useRef<AbortController | null>(null)
 
   useEffect(() => {
     if (!isEditing && report) setEditForm(report)
@@ -382,8 +382,14 @@ function ReportView({
   if (streaming || evolving) {
     return (
       <div className="glass-panel ai-streaming-panel">
-        <StreamingText chars={evolving ? evolveChars : streamedChars} phase={evolving ? 'model' : phase} />
-        {evolving && <div style={{ marginTop: 12, fontSize: 13, color: 'var(--ink-faint)', textAlign: 'center' }}>正在融入对话洞察，升级报告中...</div>}
+        <StreamingText chars={evolving ? evolveChars : streamedChars} phase={evolving ? 'model' : phase} customHint={evolving ? "正在重新组织结构和融入对话... " : undefined} />
+        {evolving && (
+          <div style={{ marginTop: 24, textAlign: 'center' }}>
+            <button type="button" className="btn btn-sm" style={{ color: 'var(--red)' }} onClick={() => evolveAbortCtrl.current?.abort()}>
+              <Square size={12} fill="currentColor" style={{ marginRight: 6 }} /> 停止升级
+            </button>
+          </div>
+        )}
       </div>
     )
   }
@@ -433,6 +439,7 @@ function ReportView({
     if (!reportId) return
     setEvolving(true)
     setEvolveChars(0)
+    evolveAbortCtrl.current = new AbortController()
     try {
       const token = getToken()
       const res = await fetch(`/api/ai-reader/report/${reportId}/evolve/stream`, {
@@ -440,7 +447,8 @@ function ReportView({
         headers: {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${token}`,
-        }
+        },
+        signal: evolveAbortCtrl.current.signal,
       })
       if (!res.ok) {
         let errText = '网络请求失败'
@@ -478,30 +486,17 @@ function ReportView({
         }
       }
 
-      // 升级完成，重新拉取最新报告，由于不知道 book_ids 我们可以直接请求 /reports 接口，但我们知道后端会返回完整的报告
-      // 最好是加一个按 ID 拉取的接口或者修改重新拉取的逻辑。这里直接通过 /reports 获取最新的一条报告即可。
-      // Wait, we can fetch all reports and find this one.
-      const updatedList = await api.get<any[]>(`/api/ai-reader/reports`)
-      const updated = updatedList.find(r => r.id === reportId)
-      if (updated) {
-        // 由于 reports 接口不返回完整 report，我们需要重新发请求。其实可以在 evolve_stream 的 DONE 返回新报告，但 stream 不太方便。
-        // 正确做法：直接通过 book_ids 获取。但 AiReportContent 没有 book_ids。
-        // 父组件在 `selectedIds` 里面有 book_ids。我们可以传进去。
-      }
-      
-      // Let's use `window.location.reload()` as a foolproof fallback if we don't want to pass selectedIds down.
-      // But we can just use the parent's reload mechanism:
       toast.success('报告升级成功！')
-      onEvolved?.(report, updated?.version || 1, updated?.updated_at || '')
-      // Better to trigger a re-fetch in the parent. Let's just emit onEvolved without the payload, and parent will trigger reload.
-      // Actually, AiReaderPage has an effect that fetches report when `selectedIds` changes.
-      // We can trigger it by just toggling selectedIds or passing a refresh function.
       window.location.reload()
-
     } catch (e: any) {
-      toast.error(e.message || '升级失败')
+      if (e.name === 'AbortError') {
+        toast('已停止升级')
+      } else {
+        toast.error(e.message || '升级失败')
+      }
     } finally {
       setEvolving(false)
+      evolveAbortCtrl.current = null
     }
   }
 

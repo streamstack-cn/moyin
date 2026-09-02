@@ -686,6 +686,7 @@ function AiSettingsModal({
 }) {
   const [baseUrl, setBaseUrl] = useState(config?.base_url || 'https://api.siliconflow.cn/v1')
   const [apiKey, setApiKey] = useState(config?.api_key || '')
+  const [httpProxy, setHttpProxy] = useState((config as any)?.http_proxy || '')
   const [model, setModel] = useState(config?.model || 'Qwen/Qwen3-8B')
   const [showKey, setShowKey] = useState(false)
   const [outputLang, setOutputLang] = useState(config?.output_lang || 'zh')
@@ -701,10 +702,6 @@ function AiSettingsModal({
   const [fetchedModels, setFetchedModels] = useState<string[]>([])
   const [fetchingModels, setFetchingModels] = useState(false)
 
-  // 后端只存了「一份」当前生效的 base_url + key，has_key 是全局标记，不区分服务商。
-  // 只有当前选中的 base_url 与已保存的 base_url 完全一致时，"已设置的 Key" 才真的对得上——
-  // 否则用户明明切换到了别的服务商（比如 DeepSeek），界面却仍然显示"已设置"，
-  // 点测试/查余额时后台用的其实是另一个服务商的 Key，自然会报错，非常误导人。
   const savedKeyMatchesCurrent = Boolean(config?.has_key && baseUrl.replace(/\/$/, '') === (config?.base_url || '').replace(/\/$/, ''))
 
   const handleFetchModels = async () => {
@@ -719,7 +716,7 @@ function AiSettingsModal({
     setFetchingModels(true)
     try {
       const res = await api.get<string[]>(
-        `/api/ai-reader/config/models?base_url=${encodeURIComponent(baseUrl)}&api_key=${encodeURIComponent(apiKey)}`,
+        `/api/ai-reader/config/models?base_url=${encodeURIComponent(baseUrl)}&api_key=${encodeURIComponent(apiKey)}&http_proxy=${encodeURIComponent(httpProxy)}`,
       )
       setFetchedModels(res)
       if (!res.length) toast.error('未获取到模型列表，服务商可能不支持该接口')
@@ -732,9 +729,6 @@ function AiSettingsModal({
   }
 
   const handleTest = async () => {
-    // apiKey 输入框为空是正常情况（已保存过 Key 时故意不回显明文），
-    // 只要当前选中的服务商就是已保存 Key 对应的那个，就应该用已保存的 Key 去测试，
-    // 而不是一律拦下来提示"未填写"；但如果切换到了别的服务商，就必须让用户重新填 Key。
     if (!baseUrl || (!apiKey && !savedKeyMatchesCurrent)) {
       toast.error(savedKeyMatchesCurrent ? '请填写完整 API 地址和 Key' : '当前服务商还没有保存过 Key，请先填写')
       return
@@ -742,7 +736,7 @@ function AiSettingsModal({
     setTestStatus({ type: 'loading', msg: '测试中…' })
     try {
       const res = await api.get<{ message: string; model: string }>(
-        `/api/ai-reader/config/test?base_url=${encodeURIComponent(baseUrl)}&api_key=${encodeURIComponent(apiKey)}&model=${encodeURIComponent(model)}`,
+        `/api/ai-reader/config/test?base_url=${encodeURIComponent(baseUrl)}&api_key=${encodeURIComponent(apiKey)}&model=${encodeURIComponent(model)}&http_proxy=${encodeURIComponent(httpProxy)}`,
       )
       setTestStatus({ type: 'success', msg: `连通成功！模型：${res.model}` })
     } catch (e: unknown) {
@@ -763,7 +757,7 @@ function AiSettingsModal({
         currency?: string
         total_balance?: number
         available_balance?: number
-      }>(`/api/ai-reader/config/balance?base_url=${encodeURIComponent(baseUrl)}&api_key=${encodeURIComponent(apiKey)}`)
+      }>(`/api/ai-reader/config/balance?base_url=${encodeURIComponent(baseUrl)}&api_key=${encodeURIComponent(apiKey)}&http_proxy=${encodeURIComponent(httpProxy)}`)
       if (!res.supported) {
         setBalance({ type: 'error', msg: res.message || '该服务商暂不支持余额查询' })
       } else {
@@ -783,6 +777,8 @@ function AiSettingsModal({
       await api.put('/api/ai-reader/config', {
         base_url: baseUrl,
         api_key: apiKey,
+        http_proxy: httpProxy,
+
         model,
         output_lang: outputLang,
         output_length: outputLength,
@@ -893,6 +889,19 @@ function AiSettingsModal({
                   </a>
                 </div>
               )}
+            </div>
+
+            <div className="ai-settings-field">
+              <label>HTTP 代理 (可选)</label>
+              <input
+                className="input"
+                value={httpProxy}
+                onChange={(e) => setHttpProxy(e.target.value)}
+                placeholder="例如 http://127.0.0.1:7890"
+              />
+              <div className="ai-settings-hint">
+                配置网络代理可直连海外服务商（本地/中转服务商留空即可）
+              </div>
             </div>
 
             <div className="ai-settings-field">

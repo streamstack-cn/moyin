@@ -270,8 +270,8 @@ class UserAiConfig(Base):
     user_id = Column(String(32), ForeignKey("users.id", ondelete="CASCADE"), primary_key=True)
     base_url = Column(Text, default="https://api.siliconflow.cn/v1")
     api_key = Column(Text, default="")   # 明文存储，本地 SQLite 用户数据
+    http_proxy = Column(Text, default="") # 用户指定的 HTTP 代理，例如 http://127.0.0.1:7890
     model = Column(String(128), default="Qwen/Qwen3-8B")
-    # 用户 AI 画像（JSON）：阅读风格、关注领域、输出语气、自定义要求
     ai_portrait = Column(Text, default="{}")
     output_lang = Column(String(8), default="zh")       # zh / zh-tw
     output_length = Column(String(16), default="standard")  # concise / standard / detailed

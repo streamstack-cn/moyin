@@ -115,6 +115,11 @@ def detect_provider(base_url: str) -> str:
     return "custom"
 
 
+def _create_client(config: dict, timeout = 15.0) -> httpx.AsyncClient:
+    proxy = config.get("http_proxy")
+    t = timeout if isinstance(timeout, httpx.Timeout) else httpx.Timeout(timeout)
+    return httpx.AsyncClient(timeout=t, proxy=proxy if proxy else None)
+
 def _build_headers(api_key: str) -> dict:
     return {
         "Authorization": f"Bearer {api_key}",
@@ -157,10 +162,10 @@ async def chat_completion(
     if temperature is not None:
         payload["temperature"] = temperature
 
-    async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
+    async with _create_client(config, _TIMEOUT) as client:
         resp = await client.post(
             f"{base_url}/chat/completions",
-            headers=_build_headers(api_key),
+            headers=_build_headers(config.get("api_key", "")),
             json=payload,
         )
 
@@ -204,11 +209,11 @@ async def chat_completion_stream(
     if temperature is not None:
         payload["temperature"] = temperature
 
-    async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
+    async with _create_client(config, _TIMEOUT) as client:
         async with client.stream(
             "POST",
             f"{base_url}/chat/completions",
-            headers=_build_headers(api_key),
+            headers=_build_headers(config.get("api_key", "")),
             json=payload,
         ) as resp:
             if resp.status_code != 200:
@@ -241,10 +246,10 @@ async def fetch_available_models(config: dict) -> list[str]:
     provider_key = detect_provider(base_url)
 
     try:
-        async with httpx.AsyncClient(timeout=httpx.Timeout(15.0)) as client:
+        async with _create_client(config, 15.0) as client:
             resp = await client.get(
                 f"{base_url}/models",
-                headers=_build_headers(api_key),
+                headers=_build_headers(config.get("api_key", "")),
             )
         if resp.status_code == 200:
             data = resp.json()
@@ -271,20 +276,20 @@ async def check_balance(config: dict) -> Optional[dict]:
     provider = detect_provider(base_url)
 
     if provider == "siliconflow":
-        return await _balance_siliconflow(api_key)
+        return await _balance_siliconflow(config)
     elif provider == "deepseek":
-        return await _balance_deepseek(api_key)
+        return await _balance_deepseek(config)
     elif provider == "kimi":
-        return await _balance_kimi(api_key)
+        return await _balance_kimi(config)
     return None
 
 
-async def _balance_siliconflow(api_key: str) -> Optional[dict]:
+async def _balance_siliconflow(config: dict) -> Optional[dict]:
     try:
-        async with httpx.AsyncClient(timeout=httpx.Timeout(10.0)) as client:
+        async with _create_client(config, 10.0) as client:
             resp = await client.get(
                 "https://api.siliconflow.cn/v1/user/info",
-                headers=_build_headers(api_key),
+                headers=_build_headers(config.get("api_key", "")),
             )
         if resp.status_code == 200:
             data = resp.json()
@@ -305,12 +310,12 @@ async def _balance_siliconflow(api_key: str) -> Optional[dict]:
         logger.debug(f"硅基流动余额查询失败: {e}")
         raise RuntimeError(f"硅基流动余额查询失败: {e}")
 
-async def _balance_deepseek(api_key: str) -> Optional[dict]:
+async def _balance_deepseek(config: dict) -> Optional[dict]:
     try:
-        async with httpx.AsyncClient(timeout=httpx.Timeout(10.0)) as client:
+        async with _create_client(config, 10.0) as client:
             resp = await client.get(
                 "https://api.deepseek.com/user/balance",
-                headers=_build_headers(api_key),
+                headers=_build_headers(config.get("api_key", "")),
             )
         if resp.status_code == 200:
             data = resp.json()
@@ -326,12 +331,12 @@ async def _balance_deepseek(api_key: str) -> Optional[dict]:
         logger.debug(f"DeepSeek 余额查询失败: {e}")
         raise RuntimeError(f"DeepSeek 余额查询失败: {e}")
 
-async def _balance_kimi(api_key: str) -> Optional[dict]:
+async def _balance_kimi(config: dict) -> Optional[dict]:
     try:
-        async with httpx.AsyncClient(timeout=httpx.Timeout(10.0)) as client:
+        async with _create_client(config, 10.0) as client:
             resp = await client.get(
                 "https://api.moonshot.cn/v1/users/me/balance",
-                headers=_build_headers(api_key),
+                headers=_build_headers(config.get("api_key", "")),
             )
         if resp.status_code == 200:
             data = resp.json()

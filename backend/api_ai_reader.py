@@ -65,6 +65,7 @@ class AiConfigUpdate(BaseModel):
     base_url: str
     api_key: str
     model: str
+    http_proxy: str = ""
     output_lang: str = "zh"
     output_length: str = "standard"
 
@@ -128,6 +129,7 @@ def _require_ai_config(cfg: UserAiConfig) -> dict:
     return {
         "base_url": cfg.base_url or "https://api.siliconflow.cn/v1",
         "api_key": cfg.api_key,
+        "http_proxy": cfg.http_proxy,
         "model": cfg.model or "Qwen/Qwen3-8B",
         "max_tokens": _length_to_tokens(cfg.output_length),
         "temperature": 0.7,
@@ -535,6 +537,7 @@ async def get_config(
     return {
         "has_key": bool(cfg.api_key),
         "base_url": cfg.base_url,
+        "http_proxy": cfg.http_proxy,
         "api_key_masked": _mask_key(cfg.api_key),
         "model": cfg.model,
         "output_lang": cfg.output_lang,
@@ -556,6 +559,7 @@ async def save_config(
     if payload.api_key and not payload.api_key.startswith("***"):
         cfg.api_key = payload.api_key.strip()
     cfg.model = payload.model.strip()
+    cfg.http_proxy = payload.http_proxy.strip()
     cfg.output_lang = payload.output_lang
     cfg.output_length = payload.output_length
     db.commit()
@@ -568,11 +572,13 @@ async def test_config(
     db: Session = Depends(get_db),
     base_url: str = Query(default=""),
     api_key: str = Query(default=""),
+    http_proxy: str = Query(default=""),
     model: str = Query(default=""),
 ):
     """测试 AI 连通性，传入参数时使用临时配置（不写入数据库）。"""
     cfg = _get_or_create_config(user.id, db)
     req_base_url = base_url.strip() or cfg.base_url or "https://api.siliconflow.cn/v1"
+    req_http_proxy = http_proxy.strip() or cfg.http_proxy
     req_api_key = api_key.strip()
     if not req_api_key:
         if req_base_url.rstrip("/") == (cfg.base_url or "").rstrip("/"):
@@ -585,6 +591,7 @@ async def test_config(
     test_cfg = {
         "base_url": req_base_url.rstrip("/"),
         "api_key": req_api_key,
+        "http_proxy": req_http_proxy,
         "model": model.strip() or cfg.model or "Qwen/Qwen3-8B",
         "max_tokens": 10,
         "temperature": 0.7,
@@ -611,6 +618,7 @@ async def get_balance(
     db: Session = Depends(get_db),
     base_url: str = Query(default=""),
     api_key: str = Query(default=""),
+    http_proxy: str = Query(default=""),
 ):
     """查询账户余额（仅支持硅基流动 / DeepSeek / Kimi）。"""
     cfg = _get_or_create_config(user.id, db)
@@ -624,7 +632,8 @@ async def get_balance(
     if not req_api_key:
         raise HTTPException(status_code=400, detail="AI API Key 未配置")
 
-    check_cfg = {"base_url": req_base_url, "api_key": req_api_key}
+    req_http_proxy = http_proxy.strip() or cfg.http_proxy
+    check_cfg = {"base_url": req_base_url, "api_key": req_api_key, "http_proxy": req_http_proxy}
 
     try:
         result = await check_balance(check_cfg)
@@ -644,6 +653,7 @@ async def get_models(
     db: Session = Depends(get_db),
     base_url: str = Query(default=""),
     api_key: str = Query(default=""),
+    http_proxy: str = Query(default=""),
 ):
     """拉取可用模型列表。"""
     cfg = _get_or_create_config(user.id, db)
@@ -657,7 +667,8 @@ async def get_models(
     if not req_api_key:
         return []
 
-    fetch_cfg = {"base_url": req_base_url, "api_key": req_api_key}
+    req_http_proxy = http_proxy.strip() or cfg.http_proxy
+    fetch_cfg = {"base_url": req_base_url, "api_key": req_api_key, "http_proxy": req_http_proxy}
 
     try:
         return await fetch_available_models(fetch_cfg)

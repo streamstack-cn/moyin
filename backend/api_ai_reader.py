@@ -119,18 +119,51 @@ def _mask_key(api_key: str) -> str:
     return api_key[:6] + "***" + api_key[-4:]
 
 
+def _get_provider_config(cfg, base_url: str) -> dict:
+    import json
+    try:
+        configs = json.loads(cfg.provider_configs or "{}")
+    except:
+        configs = {}
+    old_url = (cfg.base_url or "").rstrip("/")
+    if old_url and old_url not in configs and cfg.api_key:
+        configs[old_url] = {"api_key": cfg.api_key, "model": cfg.model, "http_proxy": cfg.http_proxy}
+    return configs.get(base_url.rstrip("/"), {})
+
+def _set_provider_config(cfg, base_url: str, payload):
+    import json
+    try:
+        configs = json.loads(cfg.provider_configs or "{}")
+    except:
+        configs = {}
+    old_url = (cfg.base_url or "").rstrip("/")
+    if old_url and old_url not in configs and cfg.api_key:
+        configs[old_url] = {"api_key": cfg.api_key, "model": cfg.model, "http_proxy": cfg.http_proxy}
+        
+    url_key = base_url.rstrip("/")
+    configs.setdefault(url_key, {})
+    if payload.api_key and not payload.api_key.startswith("***"):
+        configs[url_key]["api_key"] = payload.api_key.strip()
+    configs[url_key]["model"] = payload.model.strip()
+    configs[url_key]["http_proxy"] = payload.http_proxy.strip()
+    
+    cfg.provider_configs = json.dumps(configs, ensure_ascii=False)
+
 def _require_ai_config(cfg: UserAiConfig) -> dict:
     """检查 AI 是否已配置，返回标准化 config dict，否则抛 400。"""
-    if not cfg.api_key:
+    base_url = cfg.base_url or "https://api.siliconflow.cn/v1"
+    pcfg = _get_provider_config(cfg, base_url)
+    api_key = pcfg.get("api_key", cfg.api_key)
+    if not api_key:
         raise HTTPException(
             status_code=400,
             detail="请先在「AI 伴读 → 设置」中填写 API Key 并保存"
         )
     return {
-        "base_url": cfg.base_url or "https://api.siliconflow.cn/v1",
-        "api_key": cfg.api_key,
-        "http_proxy": cfg.http_proxy,
-        "model": cfg.model or "Qwen/Qwen3-8B",
+        "base_url": base_url,
+        "api_key": api_key,
+        "http_proxy": pcfg.get("http_proxy", cfg.http_proxy),
+        "model": pcfg.get("model", cfg.model) or "Qwen/Qwen3-8B",
         "max_tokens": _length_to_tokens(cfg.output_length),
         "temperature": 0.7,
     }
@@ -534,12 +567,15 @@ async def get_config(
     """读取当前用户的 AI 配置（API Key 脱敏）。"""
     cfg = _get_or_create_config(user.id, db)
     portrait = _load_portrait(cfg)
+    import json
+    pcfg = _get_provider_config(cfg, cfg.base_url or "")
     return {
-        "has_key": bool(cfg.api_key),
+        "provider_configs": json.loads(cfg.provider_configs or "{}"),
+        "has_key": bool(cfg.api_key or pcfg.get("api_key")),
         "base_url": cfg.base_url,
-        "http_proxy": cfg.http_proxy,
-        "api_key_masked": _mask_key(cfg.api_key),
-        "model": cfg.model,
+        "http_proxy": pcfg.get("http_proxy", cfg.http_proxy),
+        "api_key_masked": _mask_key(pcfg.get("api_key", cfg.api_key)),
+        "model": pcfg.get("model", cfg.model),
         "output_lang": cfg.output_lang,
         "output_length": cfg.output_length,
         "ai_portrait": portrait,
@@ -556,6 +592,9 @@ async def save_config(
     """保存当前用户的 AI 配置。"""
     cfg = _get_or_create_config(user.id, db)
     cfg.base_url = payload.base_url.strip().rstrip("/") or "https://api.siliconflow.cn/v1"
+    
+    _set_provider_config(cfg, cfg.base_url, payload)
+    
     if payload.api_key and not payload.api_key.startswith("***"):
         cfg.api_key = payload.api_key.strip()
     cfg.model = payload.model.strip()
@@ -578,11 +617,12 @@ async def test_config(
     """测试 AI 连通性，传入参数时使用临时配置（不写入数据库）。"""
     cfg = _get_or_create_config(user.id, db)
     req_base_url = base_url.strip() or cfg.base_url or "https://api.siliconflow.cn/v1"
-    req_http_proxy = http_proxy.strip() or cfg.http_proxy
+    pcfg = _get_provider_config(cfg, req_base_url)
+    req_http_proxy = http_proxy.strip() or pcfg.get("http_proxy", cfg.http_proxy)
     req_api_key = api_key.strip()
     if not req_api_key:
-        if req_base_url.rstrip("/") == (cfg.base_url or "").rstrip("/"):
-            req_api_key = cfg.api_key
+        if req_base_url.rstrip("/") == (cfg.base_url or "").rstrip("/") or pcfg.get("api_key"):
+            req_api_key = pcfg.get("api_key", cfg.api_key)
         else:
             raise HTTPException(status_code=400, detail="已切换服务商，请输入对应的 API Key")
     if not req_api_key:
@@ -592,7 +632,7 @@ async def test_config(
         "base_url": req_base_url.rstrip("/"),
         "api_key": req_api_key,
         "http_proxy": req_http_proxy,
-        "model": model.strip() or cfg.model or "Qwen/Qwen3-8B",
+        "model": model.strip() or pcfg.get("model", cfg.model) or "Qwen/Qwen3-8B",
         "max_tokens": 10,
         "temperature": 0.7,
     }
@@ -609,7 +649,14 @@ async def test_config(
             "reply": result["content"][:100],
         }
     except Exception as e:
-        raise HTTPException(status_code=502, detail=str(e))
+        err_msg = str(e)
+        if "429" in err_msg or "503" in err_msg or "Quota" in err_msg or "balance" in err_msg:
+            return {
+                "ok": True,
+                "model": test_cfg["model"] + " (触发服务商限流或配额，但网络已通)",
+                "reply": "",
+            }
+        raise HTTPException(status_code=502, detail=err_msg)
 
 
 @router.get("/config/balance")
@@ -623,16 +670,17 @@ async def get_balance(
     """查询账户余额（仅支持硅基流动 / DeepSeek / Kimi）。"""
     cfg = _get_or_create_config(user.id, db)
     req_base_url = base_url.strip() or cfg.base_url or "https://api.siliconflow.cn/v1"
+    pcfg = _get_provider_config(cfg, req_base_url)
     req_api_key = api_key.strip()
     if not req_api_key:
-        if req_base_url.rstrip("/") == (cfg.base_url or "").rstrip("/"):
-            req_api_key = cfg.api_key
+        if req_base_url.rstrip("/") == (cfg.base_url or "").rstrip("/") or pcfg.get("api_key"):
+            req_api_key = pcfg.get("api_key", cfg.api_key)
         else:
             raise HTTPException(status_code=400, detail="已切换服务商，请输入对应的 API Key")
     if not req_api_key:
         raise HTTPException(status_code=400, detail="AI API Key 未配置")
 
-    req_http_proxy = http_proxy.strip() or cfg.http_proxy
+    req_http_proxy = http_proxy.strip() or pcfg.get("http_proxy", cfg.http_proxy)
     check_cfg = {"base_url": req_base_url, "api_key": req_api_key, "http_proxy": req_http_proxy}
 
     try:
@@ -658,22 +706,30 @@ async def get_models(
     """拉取可用模型列表。"""
     cfg = _get_or_create_config(user.id, db)
     req_base_url = base_url.strip() or cfg.base_url or "https://api.siliconflow.cn/v1"
+    pcfg = _get_provider_config(cfg, req_base_url)
     req_api_key = api_key.strip()
     if not req_api_key:
-        if req_base_url.rstrip("/") == (cfg.base_url or "").rstrip("/"):
-            req_api_key = cfg.api_key
+        if req_base_url.rstrip("/") == (cfg.base_url or "").rstrip("/") or pcfg.get("api_key"):
+            req_api_key = pcfg.get("api_key", cfg.api_key)
         else:
             raise HTTPException(status_code=400, detail="已切换服务商，请输入对应的 API Key")
     if not req_api_key:
         return []
 
-    req_http_proxy = http_proxy.strip() or cfg.http_proxy
+    req_http_proxy = http_proxy.strip() or pcfg.get("http_proxy", cfg.http_proxy)
     fetch_cfg = {"base_url": req_base_url, "api_key": req_api_key, "http_proxy": req_http_proxy}
 
     try:
         return await fetch_available_models(fetch_cfg)
     except Exception as e:
-        raise HTTPException(status_code=502, detail=str(e))
+        err_msg = str(e)
+        if "429" in err_msg or "503" in err_msg or "Quota" in err_msg or "balance" in err_msg:
+            return {
+                "ok": True,
+                "model": test_cfg["model"] + " (触发服务商限流或配额，但网络已通)",
+                "reply": "",
+            }
+        raise HTTPException(status_code=502, detail=err_msg)
 
 
 @router.put("/portrait")
@@ -989,7 +1045,14 @@ async def chat_with_report(
             "completion_tokens": result["completion_tokens"],
         }
     except Exception as e:
-        raise HTTPException(status_code=502, detail=str(e))
+        err_msg = str(e)
+        if "429" in err_msg or "503" in err_msg or "Quota" in err_msg or "balance" in err_msg:
+            return {
+                "ok": True,
+                "model": test_cfg["model"] + " (触发服务商限流或配额，但网络已通)",
+                "reply": "",
+            }
+        raise HTTPException(status_code=502, detail=err_msg)
 
 class ReportUpdateRequest(BaseModel):
     report_json: dict

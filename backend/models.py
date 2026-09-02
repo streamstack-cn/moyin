@@ -275,6 +275,7 @@ class UserAiConfig(Base):
     ai_portrait = Column(Text, default="{}")
     output_lang = Column(String(8), default="zh")       # zh / zh-tw
     output_length = Column(String(16), default="standard")  # concise / standard / detailed
+    provider_configs = Column(Text, default="{}")  # JSON: { base_url: { api_key, model, http_proxy } }
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
 

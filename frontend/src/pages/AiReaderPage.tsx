@@ -801,8 +801,20 @@ function AiSettingsModal({
   const activeModels = activeProvider?.models || []
 
   const applyPreset = (provider: AiProvider) => {
+    const url = provider.base_url.replace(/\/$/, '')
     setBaseUrl(provider.base_url)
-    if (provider.models.length) setModel(provider.models[0])
+    
+    const pcfg = (config as any)?.provider_configs?.[url]
+    if (pcfg) {
+      setApiKey(pcfg.api_key || '')
+      setModel(pcfg.model || provider.models[0] || '')
+      setHttpProxy(pcfg.http_proxy || '')
+    } else {
+      setApiKey('')
+      if (provider.models.length) setModel(provider.models[0])
+      setHttpProxy('')
+    }
+    
     setTestStatus({ type: 'idle', msg: '' })
     setBalance({ type: 'idle', msg: '' })
     setFetchedModels([])

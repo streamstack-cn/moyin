@@ -120,11 +120,23 @@ def _create_client(config: dict, timeout = 15.0) -> httpx.AsyncClient:
     t = timeout if isinstance(timeout, httpx.Timeout) else httpx.Timeout(timeout)
     return httpx.AsyncClient(timeout=t, proxy=proxy if proxy else None)
 
-def _build_headers(api_key: str) -> dict:
-    return {
-        "Authorization": f"Bearer {api_key}",
+def _clean_key(api_key: str) -> str:
+    k = (api_key or "").strip()
+    if k.lower().startswith("bearer "):
+        k = k[7:].strip()
+    return k
+
+
+def _build_headers(api_key: str, base_url: str = "") -> dict:
+    clean = _clean_key(api_key)
+    headers = {
+        "Authorization": f"Bearer {clean}",
         "Content-Type": "application/json",
     }
+    url_lower = (base_url or "").lower()
+    if "generativelanguage" in url_lower or "google" in url_lower or "gemini" in url_lower:
+        headers["x-goog-api-key"] = clean
+    return headers
 
 
 def _build_messages(messages: list[dict], system_prompt: Optional[str]) -> list[dict]:
@@ -165,7 +177,7 @@ async def chat_completion(
     async with _create_client(config, _TIMEOUT) as client:
         resp = await client.post(
             f"{base_url}/chat/completions",
-            headers=_build_headers(config.get("api_key", "")),
+            headers=_build_headers(api_key, base_url),
             json=payload,
         )
 
@@ -213,7 +225,7 @@ async def chat_completion_stream(
         async with client.stream(
             "POST",
             f"{base_url}/chat/completions",
-            headers=_build_headers(config.get("api_key", "")),
+            headers=_build_headers(api_key, base_url),
             json=payload,
         ) as resp:
             if resp.status_code != 200:
@@ -239,7 +251,7 @@ async def chat_completion_stream(
 
 async def fetch_available_models(config: dict) -> list[str]:
     """
-    向服务商拉取可用模型列表。失败时返回服务商预设列表。
+    向服务商拉取可用模型列表。
     """
     base_url = config.get("base_url", "").rstrip("/")
     api_key = config.get("api_key", "")
@@ -249,14 +261,29 @@ async def fetch_available_models(config: dict) -> list[str]:
         async with _create_client(config, 15.0) as client:
             resp = await client.get(
                 f"{base_url}/models",
-                headers=_build_headers(config.get("api_key", "")),
+                headers=_build_headers(api_key, base_url),
             )
         if resp.status_code == 200:
             data = resp.json()
-            models = [m["id"] for m in data.get("data", []) if "id" in m]
-            return sorted(models)
+            items = data.get("data") or data.get("models") or []
+            models = []
+            for m in items:
+                if isinstance(m, dict) and "id" in m:
+                    mid = m["id"]
+                    if mid.startswith("models/"):
+                        mid = mid[7:]
+                    models.append(mid)
+                elif isinstance(m, str):
+                    mid = m[7:] if m.startswith("models/") else m
+                    models.append(mid)
+            if models:
+                return sorted(list(set(models)))
+        else:
+            _raise_ai_error(resp)
     except Exception as e:
-        logger.debug(f"拉取模型列表失败，回退到预设列表: {e}")
+        logger.debug(f"拉取模型列表失败: {e}")
+        # 若是服务商不支持 /models 或触发限流，外层 api_ai_reader 会进行兜底处理
+        raise e
 
     # 回退到预设列表
     return PROVIDERS.get(provider_key, {}).get("models", [])
@@ -286,11 +313,20 @@ async def check_balance(config: dict) -> Optional[dict]:
 
 async def _balance_siliconflow(config: dict) -> Optional[dict]:
     try:
+        api_key = config.get("api_key", "")
         async with _create_client(config, 10.0) as client:
             resp = await client.get(
                 "https://api.siliconflow.com/v1/user/info",
-                headers=_build_headers(config.get("api_key", "")),
+                headers=_build_headers(api_key, "https://api.siliconflow.com"),
             )
+            # 若 .com 遇到网络环境问题，尝试 .cn
+            if resp.status_code != 200:
+                resp_cn = await client.get(
+                    "https://api.siliconflow.cn/v1/user/info",
+                    headers=_build_headers(api_key, "https://api.siliconflow.cn"),
+                )
+                if resp_cn.status_code == 200:
+                    resp = resp_cn
         if resp.status_code == 200:
             data = resp.json()
             info = data.get("data", {})

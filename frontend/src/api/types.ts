@@ -278,6 +278,7 @@ export interface AiProviderConfig {
   has_key: boolean
   model: string
   http_proxy: string
+  models?: string[]
 }
 
 export interface AiConfig {

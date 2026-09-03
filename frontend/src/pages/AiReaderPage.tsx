@@ -675,6 +675,86 @@ function ChipMultiSelect({
   )
 }
 
+function ModelCombobox({
+  value,
+  onChange,
+  options,
+  placeholder,
+}: {
+  value: string
+  onChange: (val: string) => void
+  options: string[]
+  placeholder?: string
+}) {
+  const [open, setOpen] = useState(false)
+  const containerRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    function handleClickOutside(e: MouseEvent) {
+      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
+        setOpen(false)
+      }
+    }
+    document.addEventListener('mousedown', handleClickOutside)
+    return () => document.removeEventListener('mousedown', handleClickOutside)
+  }, [])
+
+  const filteredOptions = value
+    ? options.filter((opt) => opt.toLowerCase().includes(value.toLowerCase()))
+    : options
+
+  return (
+    <div className="ai-model-combobox" ref={containerRef}>
+      <div className="ai-model-combobox-input-wrap">
+        <input
+          className="input ai-model-combobox-input"
+          value={value}
+          onChange={(e) => {
+            onChange(e.target.value)
+            setOpen(true)
+          }}
+          onFocus={() => setOpen(true)}
+          placeholder={placeholder || '请选择或输入模型名称…'}
+        />
+        <button
+          type="button"
+          className={`ai-model-combobox-toggle${open ? ' open' : ''}`}
+          onClick={() => setOpen((prev) => !prev)}
+          tabIndex={-1}
+          aria-label="展开模型选项"
+        >
+          <ChevronDown size={14} />
+        </button>
+      </div>
+
+      {open && (
+        <div className="ai-model-dropdown">
+          {filteredOptions.length > 0 ? (
+            filteredOptions.map((opt) => (
+              <button
+                key={opt}
+                type="button"
+                className={`ai-model-dropdown-item${opt === value ? ' active' : ''}`}
+                onClick={() => {
+                  onChange(opt)
+                  setOpen(false)
+                }}
+              >
+                <span>{opt}</span>
+                {opt === value && <CheckCircle2 size={13} />}
+              </button>
+            ))
+          ) : (
+            <div className="ai-model-dropdown-empty">
+              {value ? `未匹配到预设项，直接使用「${value}」` : '暂无可用选项'}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
 function AiSettingsModal({
   config,
   providers,
@@ -812,28 +892,31 @@ function AiSettingsModal({
   const activeProviderSignup = activeProvider?.signup_url
   const activeModels = activeProvider?.models || []
 
+  // 模型列表优先级：当前会话新拉取的 fetchedModels > 数据库已持久化保存的 models > 服务商内置推荐 activeModels
+  const savedModels = config?.provider_configs?.[normalizedUrl]?.models || []
+  const displayModels = fetchedModels.length ? fetchedModels : (savedModels.length ? savedModels : activeModels)
+
   const applyPreset = (provider: AiProvider) => {
     const url = provider.base_url.replace(/\/$/, '')
     setBaseUrl(provider.base_url)
 
-    // provider_configs 已脱敏（不含明文 Key），只读 model 和 http_proxy
+    // 从持久化保存的 provider_configs 中恢复配置
     const pcfg = config?.provider_configs?.[url]
+    const pModels = (pcfg?.models && pcfg.models.length > 0) ? pcfg.models : provider.models
     if (pcfg) {
-      setModel(pcfg.model || provider.models[0] || '')
+      setModel(pcfg.model || pModels[0] || '')
       setHttpProxy(pcfg.http_proxy || '')
     } else {
-      if (provider.models.length) setModel(provider.models[0])
+      if (pModels.length) setModel(pModels[0])
       setHttpProxy('')
     }
-    // Key 输入始终清空，由"已设置"徽章提示用户已保存
+    // Key 输入清空，由"已设置"徽章提示已保存的 Key
     setApiKey('')
 
     setTestStatus({ type: 'idle', msg: '' })
     setBalance({ type: 'idle', msg: '' })
     setFetchedModels([])
   }
-
-  const displayModels = fetchedModels.length ? fetchedModels : activeModels
 
   return (
     <Modal title="AI 伴读设置" onClose={onClose} width={640}>
@@ -932,6 +1015,11 @@ function AiSettingsModal({
             <div className="ai-settings-field">
               <label>
                 默认模型
+                {displayModels.length > 0 && (
+                  <span style={{ fontSize: 11, color: 'var(--ink-faint)', fontWeight: 'normal', marginLeft: 6 }}>
+                    ({fetchedModels.length ? '刚拉取' : savedModels.length ? '已保留' : '预设'} {displayModels.length} 个)
+                  </span>
+                )}
                 <button
                   type="button"
                   className="ai-fetch-models-btn"
@@ -942,20 +1030,16 @@ function AiSettingsModal({
                   {fetchingModels ? '获取中…' : '获取实际模型'}
                 </button>
               </label>
-              <input
-                className="input"
-                list="ai-model-datalist"
+              <ModelCombobox
                 value={model}
-                onChange={(e) => setModel(e.target.value)}
+                onChange={setModel}
+                options={displayModels}
                 placeholder="请选择或输入模型，例如：Qwen/Qwen3-8B"
               />
-              <datalist id="ai-model-datalist">
-                {displayModels.map((m) => (
-                  <option key={m} value={m} />
-                ))}
-              </datalist>
               <div className="ai-settings-hint">
-                {fetchedModels.length ? '以上为服务商接口实际返回的可用模型。' : '也可直接填入服务商支持的其他模型名称，或点击上方「获取实际模型」拉取服务商真实支持的模型。'}
+                {fetchedModels.length || savedModels.length
+                  ? '已加载服务商实际返回的可用模型（支持下拉选择或输入文字模糊匹配）。'
+                  : '支持下拉选择或直接填入模型名称，点击上方「获取实际模型」拉取服务商真实支持的模型。'}
               </div>
             </div>
           </div>

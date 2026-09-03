@@ -112,25 +112,57 @@ def _get_or_create_config(user_id: str, db: Session) -> UserAiConfig:
     return cfg
 
 
+def _is_masked_key(key: Optional[str]) -> bool:
+    """判断是否为脱敏 Key 或无效占位 Key。"""
+    if not key:
+        return True
+    k = key.strip()
+    return "***" in k or not k
+
+
+def _clean_key(key: Optional[str]) -> str:
+    """清理 API Key，去除首尾空白与意外附带的 'Bearer ' 前缀。"""
+    if not key:
+        return ""
+    k = key.strip()
+    if k.lower().startswith("bearer "):
+        k = k[7:].strip()
+    return k
+
+
 def _mask_key(api_key: str) -> str:
     """脱敏显示 API Key（只留前 6 位 + *** + 末 4 位）。"""
-    if not api_key or len(api_key) <= 10:
-        return "***" if api_key else ""
-    return api_key[:6] + "***" + api_key[-4:]
+    clean = _clean_key(api_key)
+    if not clean or _is_masked_key(clean):
+        return ""
+    if len(clean) <= 10:
+        return "***"
+    return clean[:6] + "***" + clean[-4:]
 
 
-def _get_provider_config(cfg, base_url: str) -> dict:
+def _get_provider_config(cfg: UserAiConfig, base_url: str) -> dict:
     import json
     try:
         configs = json.loads(cfg.provider_configs or "{}")
-    except:
+    except Exception:
         configs = {}
-    old_url = (cfg.base_url or "").rstrip("/")
-    if old_url and old_url not in configs and cfg.api_key:
-        configs[old_url] = {"api_key": cfg.api_key, "model": cfg.model, "http_proxy": cfg.http_proxy}
-    return configs.get(base_url.rstrip("/"), {})
+    url_key = (base_url or "").rstrip("/")
+    pcfg = configs.get(url_key, {})
+    # 兼容历史数据：若 provider_configs 尚未存该 provider，但正好是当前激活的 cfg.base_url
+    if not pcfg.get("api_key") and url_key == (cfg.base_url or "").rstrip("/"):
+        if cfg.api_key and not _is_masked_key(cfg.api_key):
+            pcfg["api_key"] = _clean_key(cfg.api_key)
+    return pcfg
 
-def _set_provider_config(cfg, base_url: str, api_key: str, model: str, http_proxy: str):
+
+def _set_provider_config(
+    cfg: UserAiConfig,
+    base_url: str,
+    api_key: str,
+    model: str,
+    http_proxy: Optional[str],
+    models: Optional[list[str]] = None,
+):
     """将指定 base_url 的服务商配置写入 provider_configs JSON。"""
     import json
     try:
@@ -138,21 +170,50 @@ def _set_provider_config(cfg, base_url: str, api_key: str, model: str, http_prox
     except Exception:
         configs = {}
 
-    url_key = base_url.rstrip("/")
+    url_key = (base_url or "").rstrip("/")
+    if not url_key:
+        return
     configs.setdefault(url_key, {})
-    if api_key and not api_key.startswith("***"):
-        configs[url_key]["api_key"] = api_key.strip()
-    configs[url_key]["model"] = model.strip()
-    configs[url_key]["http_proxy"] = http_proxy.strip()
+    clean_k = _clean_key(api_key)
+    if clean_k and not _is_masked_key(clean_k):
+        configs[url_key]["api_key"] = clean_k
+    if model:
+        configs[url_key]["model"] = model.strip()
+    if http_proxy is not None:
+        configs[url_key]["http_proxy"] = http_proxy.strip()
+    if models is not None:
+        configs[url_key]["models"] = models
 
     cfg.provider_configs = json.dumps(configs, ensure_ascii=False)
 
+
+def _resolve_effective_key(cfg: UserAiConfig, base_url: str, passed_key: str) -> str:
+    """按请求的服务商解析出真实的 API Key，绝不跨服务商窜用。"""
+    clean_k = _clean_key(passed_key)
+    if clean_k and not _is_masked_key(clean_k):
+        return clean_k
+
+    req_url = (base_url or "").rstrip("/")
+    pcfg = _get_provider_config(cfg, req_url)
+    saved_k = _clean_key(pcfg.get("api_key"))
+    if saved_k and not _is_masked_key(saved_k):
+        return saved_k
+
+    cur_url = (cfg.base_url or "").rstrip("/")
+    if req_url == cur_url:
+        top_k = _clean_key(cfg.api_key)
+        if top_k and not _is_masked_key(top_k):
+            return top_k
+
+    return ""
+
+
 def _require_ai_config(cfg: UserAiConfig) -> dict:
     """检查 AI 是否已配置，返回标准化 config dict，否则抛 400。"""
-    base_url = cfg.base_url or "https://api.siliconflow.cn/v1"
+    base_url = (cfg.base_url or "https://api.siliconflow.cn/v1").rstrip("/")
     pcfg = _get_provider_config(cfg, base_url)
-    api_key = pcfg.get("api_key", cfg.api_key)
-    if not api_key:
+    api_key = _clean_key(pcfg.get("api_key") or cfg.api_key)
+    if not api_key or _is_masked_key(api_key):
         raise HTTPException(
             status_code=400,
             detail="请先在「AI 伴读 → 设置」中填写 API Key 并保存"
@@ -160,11 +221,13 @@ def _require_ai_config(cfg: UserAiConfig) -> dict:
     return {
         "base_url": base_url,
         "api_key": api_key,
-        "http_proxy": pcfg.get("http_proxy", cfg.http_proxy),
+        "http_proxy": pcfg.get("http_proxy", cfg.http_proxy or ""),
         "model": pcfg.get("model", cfg.model) or "Qwen/Qwen3-8B",
         "max_tokens": _length_to_tokens(cfg.output_length),
         "temperature": 0.7,
+        "output_lang": cfg.output_lang or "zh",
     }
+
 
 
 def _length_to_tokens(length: str) -> int:
@@ -568,23 +631,26 @@ async def get_config(
     import json
     pcfg = _get_provider_config(cfg, cfg.base_url or "")
 
-    # 脱敏 provider_configs：不暴露明文 Key，只返回 has_key / model / http_proxy
+    # 脱敏 provider_configs：不暴露明文 Key，只返回 has_key / model / http_proxy / models
     raw_configs = json.loads(cfg.provider_configs or "{}")
     safe_configs = {}
     for url, pc in raw_configs.items():
+        k = pc.get("api_key", "")
         safe_configs[url] = {
-            "has_key": bool(pc.get("api_key")),
+            "has_key": bool(k and not _is_masked_key(k)),
             "model": pc.get("model", ""),
             "http_proxy": pc.get("http_proxy", ""),
+            "models": pc.get("models", []),
         }
 
+    active_key = _clean_key(pcfg.get("api_key") or cfg.api_key)
     return {
         "provider_configs": safe_configs,
-        "has_key": bool(cfg.api_key or pcfg.get("api_key")),
+        "has_key": bool(active_key and not _is_masked_key(active_key)),
         "base_url": cfg.base_url,
-        "http_proxy": pcfg.get("http_proxy", cfg.http_proxy),
-        "api_key_masked": _mask_key(pcfg.get("api_key", cfg.api_key)),
-        "model": pcfg.get("model", cfg.model),
+        "http_proxy": pcfg.get("http_proxy", cfg.http_proxy or ""),
+        "api_key_masked": _mask_key(active_key),
+        "model": pcfg.get("model", cfg.model or ""),
         "output_lang": cfg.output_lang,
         "output_length": cfg.output_length,
         "ai_portrait": portrait,
@@ -604,19 +670,25 @@ async def save_config(
     new_base_url = payload.base_url.strip().rstrip("/") or "https://api.siliconflow.cn/v1"
     old_base_url = (cfg.base_url or "").rstrip("/")
 
-    # ── 关键：先保存旧服务商的配置到 provider_configs ──
-    if old_base_url and old_base_url != new_base_url and cfg.api_key:
+    # 1. 归档旧服务商配置
+    if old_base_url and old_base_url != new_base_url and cfg.api_key and not _is_masked_key(cfg.api_key):
         _set_provider_config(cfg, old_base_url, cfg.api_key, cfg.model, cfg.http_proxy)
 
-    # ── 保存新服务商的配置 ──
-    _set_provider_config(cfg, new_base_url, payload.api_key, payload.model, payload.http_proxy)
+    # 2. 写入新服务商配置
+    clean_k = _clean_key(payload.api_key)
+    _set_provider_config(cfg, new_base_url, clean_k, payload.model, payload.http_proxy)
 
-    # ── 更新顶层字段（当前激活配置）──
+    # 3. 切换当前顶层激活服务商（Key 自动恢复对应服务商已存的值）
+    pcfg = _get_provider_config(cfg, new_base_url)
     cfg.base_url = new_base_url
-    if payload.api_key and not payload.api_key.startswith("***"):
-        cfg.api_key = payload.api_key.strip()
-    cfg.model = payload.model.strip()
-    cfg.http_proxy = payload.http_proxy.strip()
+    if clean_k and not _is_masked_key(clean_k):
+        cfg.api_key = clean_k
+    else:
+        # 用户未输入新 Key，恢复该服务商原本保存的明文 Key
+        cfg.api_key = _clean_key(pcfg.get("api_key", ""))
+
+    cfg.model = payload.model.strip() or pcfg.get("model", "")
+    cfg.http_proxy = payload.http_proxy.strip() if payload.http_proxy is not None else pcfg.get("http_proxy", "")
     cfg.output_lang = payload.output_lang
     cfg.output_length = payload.output_length
     db.commit()
@@ -636,21 +708,20 @@ async def test_config(
     cfg = _get_or_create_config(user.id, db)
     req_base_url = base_url.strip() or cfg.base_url or "https://api.siliconflow.cn/v1"
     pcfg = _get_provider_config(cfg, req_base_url)
-    req_http_proxy = http_proxy.strip() or pcfg.get("http_proxy", cfg.http_proxy)
-    req_api_key = api_key.strip()
-    if not req_api_key or req_api_key.startswith("***"):
-        if req_base_url.rstrip("/") == (cfg.base_url or "").rstrip("/") or pcfg.get("api_key"):
-            req_api_key = pcfg.get("api_key", cfg.api_key)
-        else:
-            raise HTTPException(status_code=400, detail="已切换服务商，请输入对应的 API Key")
+
+    req_api_key = _resolve_effective_key(cfg, req_base_url, api_key)
     if not req_api_key:
-        raise HTTPException(status_code=400, detail="AI API Key 未配置")
+        raise HTTPException(status_code=400, detail="当前服务商还没有保存过 Key，请先填写")
+
+    req_http_proxy = http_proxy.strip() if http_proxy is not None else pcfg.get("http_proxy", cfg.http_proxy or "")
+    provider_default_model = PROVIDERS.get(detect_provider(req_base_url), {}).get("models", [""])[0]
+    effective_model = model.strip() or pcfg.get("model") or provider_default_model or "Qwen/Qwen3-8B"
 
     test_cfg = {
         "base_url": req_base_url.rstrip("/"),
         "api_key": req_api_key,
         "http_proxy": req_http_proxy,
-        "model": model.strip() or pcfg.get("model", cfg.model) or "Qwen/Qwen3-8B",
+        "model": effective_model,
         "max_tokens": 10,
         "temperature": 0.7,
     }
@@ -689,16 +760,12 @@ async def get_balance(
     cfg = _get_or_create_config(user.id, db)
     req_base_url = base_url.strip() or cfg.base_url or "https://api.siliconflow.cn/v1"
     pcfg = _get_provider_config(cfg, req_base_url)
-    req_api_key = api_key.strip()
-    if not req_api_key or req_api_key.startswith("***"):
-        if req_base_url.rstrip("/") == (cfg.base_url or "").rstrip("/") or pcfg.get("api_key"):
-            req_api_key = pcfg.get("api_key", cfg.api_key)
-        else:
-            raise HTTPException(status_code=400, detail="已切换服务商，请输入对应的 API Key")
-    if not req_api_key:
-        raise HTTPException(status_code=400, detail="AI API Key 未配置")
 
-    req_http_proxy = http_proxy.strip() or pcfg.get("http_proxy", cfg.http_proxy)
+    req_api_key = _resolve_effective_key(cfg, req_base_url, api_key)
+    if not req_api_key:
+        raise HTTPException(status_code=400, detail="当前服务商还没有保存过 Key，请先填写")
+
+    req_http_proxy = http_proxy.strip() if http_proxy is not None else pcfg.get("http_proxy", cfg.http_proxy or "")
     check_cfg = {"base_url": req_base_url, "api_key": req_api_key, "http_proxy": req_http_proxy}
 
     try:
@@ -721,24 +788,25 @@ async def get_models(
     api_key: str = Query(default=""),
     http_proxy: str = Query(default=""),
 ):
-    """拉取可用模型列表。"""
+    """拉取可用模型列表，成功拉取后自动持久化到该服务商配置中。"""
     cfg = _get_or_create_config(user.id, db)
     req_base_url = base_url.strip() or cfg.base_url or "https://api.siliconflow.cn/v1"
     pcfg = _get_provider_config(cfg, req_base_url)
-    req_api_key = api_key.strip()
-    if not req_api_key or req_api_key.startswith("***"):
-        if req_base_url.rstrip("/") == (cfg.base_url or "").rstrip("/") or pcfg.get("api_key"):
-            req_api_key = pcfg.get("api_key", cfg.api_key)
-        else:
-            raise HTTPException(status_code=400, detail="已切换服务商，请输入对应的 API Key")
-    if not req_api_key:
-        return []
 
-    req_http_proxy = http_proxy.strip() or pcfg.get("http_proxy", cfg.http_proxy)
+    req_api_key = _resolve_effective_key(cfg, req_base_url, api_key)
+    if not req_api_key:
+        raise HTTPException(status_code=400, detail="当前服务商还没有保存过 Key，请先填写")
+
+    req_http_proxy = http_proxy.strip() if http_proxy is not None else pcfg.get("http_proxy", cfg.http_proxy or "")
     fetch_cfg = {"base_url": req_base_url, "api_key": req_api_key, "http_proxy": req_http_proxy}
 
     try:
-        return await fetch_available_models(fetch_cfg)
+        models = await fetch_available_models(fetch_cfg)
+        if models:
+            # 自动持久化保存到数据库该服务商配置中
+            _set_provider_config(cfg, req_base_url, req_api_key, pcfg.get("model", cfg.model), req_http_proxy, models=models)
+            db.commit()
+        return models
     except Exception as e:
         err_msg = str(e)
         # 限流/配额错误 → 返回预设模型列表作为 fallback
@@ -746,6 +814,7 @@ async def get_models(
             provider_key = detect_provider(req_base_url)
             return PROVIDERS.get(provider_key, {}).get("models", [])
         raise HTTPException(status_code=502, detail=err_msg)
+
 
 
 @router.put("/portrait")

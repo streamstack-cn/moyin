@@ -361,6 +361,8 @@ function ReportView({
   version,
   updatedAt,
   onStopMainGen,
+  onReportUpgraded,
+  onRegisterEvolve,
 }: {
   report: AiReportContent | null
   reportId: string | null
@@ -375,6 +377,8 @@ function ReportView({
   version?: number
   updatedAt?: string | null
   onStopMainGen?: () => void
+  onReportUpgraded?: () => void
+  onRegisterEvolve?: (fn: () => void) => void
 }) {
   const [isEditing, setIsEditing] = useState(false)
   const [editForm, setEditForm] = useState<AiReportContent | null>(null)
@@ -487,8 +491,13 @@ function ReportView({
         }
       }
 
-      toast.success('报告升级成功！')
-      window.location.reload()
+      clearAiGenerateSession()
+      toast.success('报告升级成功！已融合追问见解')
+      if (onReportUpgraded) {
+        onReportUpgraded()
+      } else {
+        window.location.reload()
+      }
     } catch (e: any) {
       if (e.name === 'AbortError') {
         toast('已停止升级')
@@ -500,6 +509,10 @@ function ReportView({
       evolveAbortCtrl.current = null
     }
   }
+
+  useEffect(() => {
+    onRegisterEvolve?.(handleEvolve)
+  }, [onRegisterEvolve, reportId])
 
   const sections = [
     { key: 'content_summary' as keyof AiReportContent, icon: <BookOpen size={15} />, title: '内容概括', kicker: '开篇' },
@@ -1149,12 +1162,22 @@ function AiSettingsModal({
   )
 }
 
-function ChatPanel({ bookIds, hasReport, reportId, initialMessages, autoSaveInitial = true }: {
+function ChatPanel({
+  bookIds,
+  hasReport,
+  reportId,
+  initialMessages,
+  autoSaveInitial = true,
+  onMessagesChange,
+  onEvolve,
+}: {
   bookIds: string[]
   hasReport: boolean
   reportId: string | null
   initialMessages?: { role: string; content: string }[]
   autoSaveInitial?: boolean
+  onMessagesChange?: (msgs: { role: string; content: string }[]) => void
+  onEvolve?: () => void
 }) {
   const [messages, setMessages] = useState<{ role: string; content: string }[]>(initialMessages || [])
   const [input, setInput] = useState('')
@@ -1162,11 +1185,11 @@ function ChatPanel({ bookIds, hasReport, reportId, initialMessages, autoSaveInit
   const [autoSave, setAutoSave] = useState(autoSaveInitial)
   const bottomRef = useRef<HTMLDivElement>(null)
 
-  // 当 initialMessages 变化时（切换报告），重置对话
+  // 当 initialMessages 或 reportId / autoSaveInitial 变化时，同步对话
   useEffect(() => {
     setMessages(initialMessages || [])
     setAutoSave(autoSaveInitial)
-  }, [reportId, autoSaveInitial])
+  }, [reportId, autoSaveInitial, initialMessages])
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
@@ -1177,24 +1200,30 @@ function ChatPanel({ bookIds, hasReport, reportId, initialMessages, autoSaveInit
     if (!textToSend || sending) return
     const userMsg = { role: 'user', content: textToSend }
     setInput('')
-    setMessages((prev) => [...prev, userMsg])
+    const msgsWithUser = [...messages, userMsg]
+    setMessages(msgsWithUser)
+    onMessagesChange?.(msgsWithUser)
     setSending(true)
-    let newMessages = [...messages, userMsg]
+    let newMessages = msgsWithUser
     try {
-      const res = await api.post<{ content: string }>('/api/ai-reader/chat', {
+      const res = await api.post<{ content: string; chat_history?: { role: string; content: string }[] }>('/api/ai-reader/chat', {
         book_ids: bookIds,
         messages: newMessages,
       })
       const asstMsg = { role: 'assistant', content: res.content }
-      newMessages = [...newMessages, asstMsg]
-      setMessages((prev) => [...prev, asstMsg])
+      newMessages = res.chat_history || [...newMessages, asstMsg]
+      setMessages(newMessages)
+      onMessagesChange?.(newMessages)
     } catch (e: unknown) {
-      setMessages((prev) => [...prev, { role: 'assistant', content: `⚠️ ${(e as Error)?.message || '请求失败'}` }])
+      const errMsg = { role: 'assistant', content: `⚠️ ${(e as Error)?.message || '请求失败'}` }
+      newMessages = [...newMessages, errMsg]
+      setMessages(newMessages)
+      onMessagesChange?.(newMessages)
     } finally {
       setSending(false)
     }
 
-    // 自动保存逻辑
+    // 自动保存逻辑（后端 /chat 亦有保存机制，前端补充双重保障）
     if (autoSave && reportId) {
       try {
         await api.put(`/api/ai-reader/report/${reportId}/chat`, { messages: newMessages })
@@ -1231,10 +1260,33 @@ function ChatPanel({ bookIds, hasReport, reportId, initialMessages, autoSaveInit
         <span style={{ flex: 1 }}>追问 AI</span>
         
         {reportId && (
-          <label className="checkbox-label" style={{ display: 'flex', alignItems: 'center', gap: 4, cursor: 'pointer', fontSize: 12, color: 'var(--ink-faint)' }}>
-            <input type="checkbox" checked={autoSave} onChange={toggleAutoSave} />
-            保留对话
-          </label>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            {messages.length > 0 && onEvolve && (
+              <button
+                type="button"
+                className="btn btn-xs"
+                onClick={onEvolve}
+                style={{
+                  color: 'var(--accent)',
+                  borderColor: 'var(--accent-faint)',
+                  background: 'var(--accent-wash)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 4,
+                  padding: '2px 8px',
+                  fontSize: 12,
+                  cursor: 'pointer',
+                }}
+                title="将当前的追问对话见解融入并升级阅读报告"
+              >
+                <Sparkles size={11} /> AI 升级报告
+              </button>
+            )}
+            <label className="checkbox-label" style={{ display: 'flex', alignItems: 'center', gap: 4, cursor: 'pointer', fontSize: 12, color: 'var(--ink-faint)' }}>
+              <input type="checkbox" checked={autoSave} onChange={toggleAutoSave} />
+              保留对话
+            </label>
+          </div>
         )}
       </div>
 
@@ -1355,6 +1407,26 @@ function AiReaderPage() {
   const [includeFullText, setIncludeFullText] = useState(false)
 
   const [searchQuery, setSearchQuery] = useState('')
+  const evolveTriggerRef = useRef<(() => void) | null>(null)
+
+  const refreshCurrentReport = useCallback(async () => {
+    if (!selectedIds.length) return
+    try {
+      const ids = selectedIds.join(',')
+      const r = await api.get<AiReport | null>(`/api/ai-reader/report?book_ids=${ids}`)
+      if (r) {
+        setReport(r.report)
+        setReportId(r.id)
+        setReportGenAt(r.generated_at)
+        setReportVersion(r.version)
+        setReportUpdatedAt(r.updated_at || null)
+        setReportAutoSaveChat(r.auto_save_chat ?? true)
+        setChatHistory(r.chat_history || [])
+      }
+    } catch {
+      window.location.reload()
+    }
+  }, [selectedIds])
 
   const streaming = session.status === 'streaming'
   const streamedChars = session.streamedChars
@@ -1467,7 +1539,7 @@ function AiReaderPage() {
       setReportGenAt(s.reportGenAt)
       setReportVersion(s.reportVersion)
       setReportUpdatedAt(s.reportUpdatedAt)
-      return
+      // 注意：不在此处直接 return，继续向后端请求以加载完整的 chat_history 和 auto_save_chat 设置
     }
 
     api
@@ -1744,7 +1816,15 @@ function AiReaderPage() {
                 </div>
               )}
 
-              <ChatPanel bookIds={selectedIds} hasReport={hasReport} reportId={reportId} initialMessages={chatHistory} autoSaveInitial={reportAutoSaveChat} />
+              <ChatPanel
+                bookIds={selectedIds}
+                hasReport={hasReport}
+                reportId={reportId}
+                initialMessages={chatHistory}
+                autoSaveInitial={reportAutoSaveChat}
+                onMessagesChange={setChatHistory}
+                onEvolve={() => evolveTriggerRef.current?.()}
+              />
               <ReportView
                 report={report}
                 reportId={reportId}
@@ -1759,6 +1839,8 @@ function AiReaderPage() {
                 version={reportVersion}
                 onStopMainGen={stopGenerating}
                 updatedAt={reportUpdatedAt}
+                onReportUpgraded={refreshCurrentReport}
+                onRegisterEvolve={(fn) => { evolveTriggerRef.current = fn }}
               />
             </div>
           </div>

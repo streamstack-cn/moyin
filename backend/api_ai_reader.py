@@ -1125,10 +1125,20 @@ async def chat_with_report(
 
     try:
         result = await chat_completion(messages, ai_cfg, system_prompt)
+        asst_msg = {"role": "assistant", "content": result["content"]}
+        full_messages = messages + [asst_msg]
+
+        # 若已有关联报告且开启了自动保存（默认开启），后端直接自动将对话入库，提供双重持久化保障
+        if report_rec and getattr(report_rec, "auto_save_chat", True):
+            clean = [{"role": m.get("role", "user"), "content": m.get("content", "")} for m in full_messages]
+            report_rec.chat_history = json.dumps(clean, ensure_ascii=False)
+            db.commit()
+
         return {
             "content": result["content"],
             "prompt_tokens": result["prompt_tokens"],
             "completion_tokens": result["completion_tokens"],
+            "chat_history": full_messages,
         }
     except Exception as e:
         err_msg = str(e)

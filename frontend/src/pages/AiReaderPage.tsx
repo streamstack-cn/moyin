@@ -686,7 +686,7 @@ function AiSettingsModal({
 }) {
   const [baseUrl, setBaseUrl] = useState(config?.base_url || 'https://api.siliconflow.cn/v1')
   const [apiKey, setApiKey] = useState(config?.api_key || '')
-  const [httpProxy, setHttpProxy] = useState((config as any)?.http_proxy || '')
+  const [httpProxy, setHttpProxy] = useState(config?.http_proxy || '')
   const [model, setModel] = useState(config?.model || 'Qwen/Qwen3-8B')
   const [showKey, setShowKey] = useState(false)
   const [outputLang, setOutputLang] = useState(config?.output_lang || 'zh')
@@ -702,14 +702,19 @@ function AiSettingsModal({
   const [fetchedModels, setFetchedModels] = useState<string[]>([])
   const [fetchingModels, setFetchingModels] = useState(false)
 
-  const savedKeyMatchesCurrent = Boolean(config?.has_key && baseUrl.replace(/\/$/, '') === (config?.base_url || '').replace(/\/$/, ''))
+  // 当前服务商是否已有保存的 Key（支持多服务商独立存储）
+  const normalizedUrl = baseUrl.replace(/\/$/, '')
+  const isActiveProvider = normalizedUrl === (config?.base_url || '').replace(/\/$/, '')
+  const providerHasKey = Boolean(
+    (isActiveProvider && config?.has_key) || config?.provider_configs?.[normalizedUrl]?.has_key,
+  )
 
   const handleFetchModels = async () => {
     if (!baseUrl) {
       toast.error('请先填写 API Base URL')
       return
     }
-    if (!apiKey && !savedKeyMatchesCurrent) {
+    if (!apiKey && !providerHasKey) {
       toast.error('当前服务商还没有保存过 Key，请先填写')
       return
     }
@@ -729,8 +734,8 @@ function AiSettingsModal({
   }
 
   const handleTest = async () => {
-    if (!baseUrl || (!apiKey && !savedKeyMatchesCurrent)) {
-      toast.error(savedKeyMatchesCurrent ? '请填写完整 API 地址和 Key' : '当前服务商还没有保存过 Key，请先填写')
+    if (!baseUrl || (!apiKey && !providerHasKey)) {
+      toast.error(providerHasKey ? '请填写完整 API 地址和 Key' : '当前服务商还没有保存过 Key，请先填写')
       return
     }
     setTestStatus({ type: 'loading', msg: '测试中…' })
@@ -745,8 +750,8 @@ function AiSettingsModal({
   }
 
   const handleCheckBalance = async () => {
-    if (!baseUrl || (!apiKey && !savedKeyMatchesCurrent)) {
-      toast.error(savedKeyMatchesCurrent ? '请填写完整 API 地址和 Key' : '当前服务商还没有保存过 Key，请先填写')
+    if (!baseUrl || (!apiKey && !providerHasKey)) {
+      toast.error(providerHasKey ? '请填写完整 API 地址和 Key' : '当前服务商还没有保存过 Key，请先填写')
       return
     }
     setBalance({ type: 'loading', msg: '查询中…' })
@@ -803,18 +808,19 @@ function AiSettingsModal({
   const applyPreset = (provider: AiProvider) => {
     const url = provider.base_url.replace(/\/$/, '')
     setBaseUrl(provider.base_url)
-    
-    const pcfg = (config as any)?.provider_configs?.[url]
+
+    // provider_configs 已脱敏（不含明文 Key），只读 model 和 http_proxy
+    const pcfg = config?.provider_configs?.[url]
     if (pcfg) {
-      setApiKey(pcfg.api_key || '')
       setModel(pcfg.model || provider.models[0] || '')
       setHttpProxy(pcfg.http_proxy || '')
     } else {
-      setApiKey('')
       if (provider.models.length) setModel(provider.models[0])
       setHttpProxy('')
     }
-    
+    // Key 输入始终清空，由"已设置"徽章提示用户已保存
+    setApiKey('')
+
     setTestStatus({ type: 'idle', msg: '' })
     setBalance({ type: 'idle', msg: '' })
     setFetchedModels([])
@@ -863,7 +869,7 @@ function AiSettingsModal({
             <div className="ai-settings-field">
               <label>
                 API Key
-                {savedKeyMatchesCurrent && (
+                {providerHasKey && (
                   <span className="ai-key-configured-badge">
                     <CheckCircle2 size={11} /> 已设置 {config?.api_key_masked}
                   </span>
@@ -875,7 +881,7 @@ function AiSettingsModal({
                   type={showKey ? 'text' : 'password'}
                   value={apiKey}
                   onChange={(e) => setApiKey(e.target.value)}
-                  placeholder={savedKeyMatchesCurrent ? '留空则不修改已保存的 Key…' : 'sk-…'}
+                  placeholder={providerHasKey ? '留空则不修改已保存的 Key…' : 'sk-…'}
                   style={{ paddingRight: 40 }}
                 />
                 <button
@@ -888,7 +894,7 @@ function AiSettingsModal({
                   {showKey ? <EyeOff size={14} /> : <Eye size={14} />}
                 </button>
               </div>
-              {config?.has_key && !savedKeyMatchesCurrent && (
+              {config?.has_key && !providerHasKey && (
                 <div className="ai-settings-hint ai-settings-hint-warn">
                   当前保存的 Key 属于「{detectProviderName(config?.base_url, providerList)}」，切换到「{activeProvider?.name || '当前服务商'}」后需要重新填写对应的 Key
                 </div>

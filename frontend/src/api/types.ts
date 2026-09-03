@@ -274,16 +274,24 @@ export interface AiProvider {
   models: string[]
 }
 
+export interface AiProviderConfig {
+  has_key: boolean
+  model: string
+  http_proxy: string
+}
+
 export interface AiConfig {
   has_key: boolean
   base_url: string
   api_key_masked: string
   api_key?: string
+  http_proxy: string
   model: string
   output_lang: string
   output_length: string
   ai_portrait: AiPortrait
   provider: string
+  provider_configs: Record<string, AiProviderConfig>
 }
 
 export interface AiPortrait {

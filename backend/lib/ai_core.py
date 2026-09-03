@@ -288,7 +288,7 @@ async def _balance_siliconflow(config: dict) -> Optional[dict]:
     try:
         async with _create_client(config, 10.0) as client:
             resp = await client.get(
-                "https://api.siliconflow.cn/v1/user/info",
+                "https://api.siliconflow.com/v1/user/info",
                 headers=_build_headers(config.get("api_key", "")),
             )
         if resp.status_code == 200:

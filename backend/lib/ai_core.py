@@ -78,12 +78,10 @@ PROVIDERS: dict[str, dict] = {
         "has_balance": False,
         "signup_url": "https://aistudio.google.com/apikey",
         "models": [
-            "gemini-2.5-pro",
-            "gemini-2.5-flash",
             "gemini-2.0-flash",
-            "gemini-2.0-pro-exp-0205",
-            "gemini-1.5-pro",
             "gemini-1.5-flash",
+            "gemini-1.5-pro",
+            "gemini-2.0-pro-exp-0205",
         ],
     },
     "custom": {
@@ -174,10 +172,15 @@ async def chat_completion(
     if temperature is not None:
         payload["temperature"] = temperature
 
+    params = None
+    if "generativelanguage" in base_url.lower() or "gemini" in base_url.lower():
+        params = {"key": _clean_key(api_key)}
+
     async with _create_client(config, _TIMEOUT) as client:
         resp = await client.post(
             f"{base_url}/chat/completions",
             headers=_build_headers(api_key, base_url),
+            params=params,
             json=payload,
         )
 
@@ -221,11 +224,16 @@ async def chat_completion_stream(
     if temperature is not None:
         payload["temperature"] = temperature
 
+    params = None
+    if "generativelanguage" in base_url.lower() or "gemini" in base_url.lower():
+        params = {"key": _clean_key(api_key)}
+
     async with _create_client(config, _TIMEOUT) as client:
         async with client.stream(
             "POST",
             f"{base_url}/chat/completions",
             headers=_build_headers(api_key, base_url),
+            params=params,
             json=payload,
         ) as resp:
             if resp.status_code != 200:
@@ -257,11 +265,16 @@ async def fetch_available_models(config: dict) -> list[str]:
     api_key = config.get("api_key", "")
     provider_key = detect_provider(base_url)
 
+    params = None
+    if "generativelanguage" in base_url.lower() or "gemini" in base_url.lower():
+        params = {"key": _clean_key(api_key)}
+
     try:
         async with _create_client(config, 15.0) as client:
             resp = await client.get(
                 f"{base_url}/models",
                 headers=_build_headers(api_key, base_url),
+                params=params,
             )
         if resp.status_code == 200:
             data = resp.json()
@@ -312,39 +325,57 @@ async def check_balance(config: dict) -> Optional[dict]:
 
 
 async def _balance_siliconflow(config: dict) -> Optional[dict]:
-    try:
-        api_key = config.get("api_key", "")
-        async with _create_client(config, 10.0) as client:
-            resp = await client.get(
-                "https://api.siliconflow.com/v1/user/info",
-                headers=_build_headers(api_key, "https://api.siliconflow.com"),
-            )
-            # 若 .com 遇到网络环境问题，尝试 .cn
-            if resp.status_code != 200:
-                resp_cn = await client.get(
-                    "https://api.siliconflow.cn/v1/user/info",
-                    headers=_build_headers(api_key, "https://api.siliconflow.cn"),
-                )
-                if resp_cn.status_code == 200:
-                    resp = resp_cn
-        if resp.status_code == 200:
-            data = resp.json()
-            info = data.get("data", {})
-            balance = float(info.get("totalBalance", 0) or 0)
-            charged = float(info.get("chargeBalance", 0) or 0)
-            free = float(info.get("balance", 0) or 0)
-            return {
-                "currency": "CNY",
-                "total_balance": balance,
-                "available_balance": charged + free,
-                "charged_balance": charged,
-                "free_balance": free,
-            }
-        _raise_ai_error(resp)
-    except Exception as e:
-        if isinstance(e, RuntimeError): raise e
-        logger.debug(f"硅基流动余额查询失败: {e}")
-        raise RuntimeError(f"硅基流动余额查询失败: {e}")
+    api_key = config.get("api_key", "")
+    base_url = (config.get("base_url") or "https://api.siliconflow.cn/v1").rstrip("/")
+    clean_k = _clean_key(api_key)
+
+    # 优先根据用户当前配置的域名（.cn 或 .com）确定首选与后备地址
+    if "siliconflow.com" in base_url:
+        endpoints = [
+            "https://api.siliconflow.com/v1/user/info",
+            "https://api.siliconflow.cn/v1/user/info",
+        ]
+    else:
+        endpoints = [
+            "https://api.siliconflow.cn/v1/user/info",
+            "https://api.siliconflow.com/v1/user/info",
+        ]
+
+    headers = {
+        "Authorization": f"Bearer {clean_k}",
+        "Accept": "application/json",
+    }
+
+    last_resp = None
+    last_err = None
+    async with _create_client(config, 10.0) as client:
+        for ep in endpoints:
+            try:
+                resp = await client.get(ep, headers=headers)
+                last_resp = resp
+                if resp.status_code == 200:
+                    data = resp.json()
+                    info = data.get("data", {}) or {}
+                    balance = float(info.get("totalBalance", 0) or 0)
+                    charged = float(info.get("chargeBalance", 0) or 0)
+                    free = float(info.get("balance", 0) or 0)
+                    return {
+                        "currency": "CNY",
+                        "total_balance": balance,
+                        "available_balance": charged + free,
+                        "charged_balance": charged,
+                        "free_balance": free,
+                    }
+                # 若主域名遭遇 401 且还有备用域名，尝试备用域名
+            except Exception as e:
+                last_err = e
+                continue
+
+    if last_resp is not None:
+        _raise_ai_error(last_resp)
+    elif last_err is not None:
+        raise RuntimeError(f"硅基流动余额查询失败: {last_err}")
+    raise RuntimeError("硅基流动余额查询失败: 无响应")
 
 async def _balance_deepseek(config: dict) -> Optional[dict]:
     try:

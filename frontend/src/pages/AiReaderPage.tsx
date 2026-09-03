@@ -53,7 +53,7 @@ const FALLBACK_PROVIDERS: AiProvider[] = [
   { key: 'kimi', name: 'Kimi', base_url: 'https://api.moonshot.cn/v1', has_balance: true, recommended: false, signup_url: '', models: ['moonshot-v1-8k'] },
   { key: 'qwen', name: '通义千问', base_url: 'https://dashscope.aliyuncs.com/compatible-mode/v1', has_balance: false, recommended: false, signup_url: '', models: ['qwen-plus'] },
   { key: 'openai', name: 'OpenAI', base_url: 'https://api.openai.com/v1', has_balance: false, recommended: false, signup_url: '', models: ['gpt-4o-mini'] },
-  { key: 'gemini', name: 'Google Gemini', base_url: 'https://generativelanguage.googleapis.com/v1beta/openai', has_balance: false, recommended: false, signup_url: '', models: ['gemini-2.5-flash'] },
+  { key: 'gemini', name: 'Google Gemini', base_url: 'https://generativelanguage.googleapis.com/v1beta/openai', has_balance: false, recommended: false, signup_url: '', models: ['gemini-2.0-flash', 'gemini-1.5-flash', 'gemini-1.5-pro'] },
   { key: 'custom', name: '自定义', base_url: '', has_balance: false, recommended: false, signup_url: '', models: [] },
 ]
 
@@ -687,20 +687,24 @@ function ModelCombobox({
   placeholder?: string
 }) {
   const [open, setOpen] = useState(false)
+  const [searchTerm, setSearchTerm] = useState('')
   const containerRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     function handleClickOutside(e: MouseEvent) {
       if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
         setOpen(false)
+        setSearchTerm('')
       }
     }
     document.addEventListener('mousedown', handleClickOutside)
     return () => document.removeEventListener('mousedown', handleClickOutside)
   }, [])
 
-  const filteredOptions = value
-    ? options.filter((opt) => opt.toLowerCase().includes(value.toLowerCase()))
+  // 关键：当用户在搜索框中键入关键词时按关键词过滤；无关键词或仅展开时，全量展示 options 列表
+  const query = searchTerm.trim().toLowerCase()
+  const filteredOptions = query
+    ? options.filter((opt) => opt.toLowerCase().includes(query))
     : options
 
   return (
@@ -708,18 +712,28 @@ function ModelCombobox({
       <div className="ai-model-combobox-input-wrap">
         <input
           className="input ai-model-combobox-input"
-          value={value}
+          value={open ? (searchTerm !== '' ? searchTerm : value) : value}
           onChange={(e) => {
-            onChange(e.target.value)
+            const val = e.target.value
+            setSearchTerm(val)
+            onChange(val)
             setOpen(true)
           }}
-          onFocus={() => setOpen(true)}
+          onFocus={() => {
+            setOpen(true)
+            setSearchTerm('')
+          }}
           placeholder={placeholder || '请选择或输入模型名称…'}
         />
         <button
           type="button"
           className={`ai-model-combobox-toggle${open ? ' open' : ''}`}
-          onClick={() => setOpen((prev) => !prev)}
+          onClick={() => {
+            setOpen((prev) => {
+              if (!prev) setSearchTerm('')
+              return !prev
+            })
+          }}
           tabIndex={-1}
           aria-label="展开模型选项"
         >
@@ -737,6 +751,7 @@ function ModelCombobox({
                 className={`ai-model-dropdown-item${opt === value ? ' active' : ''}`}
                 onClick={() => {
                   onChange(opt)
+                  setSearchTerm('')
                   setOpen(false)
                 }}
               >
@@ -746,7 +761,7 @@ function ModelCombobox({
             ))
           ) : (
             <div className="ai-model-dropdown-empty">
-              {value ? `未匹配到预设项，直接使用「${value}」` : '暂无可用选项'}
+              {searchTerm ? `未匹配到预设项，直接使用「${searchTerm}」` : '暂无可用选项'}
             </div>
           )}
         </div>
@@ -961,7 +976,7 @@ function AiSettingsModal({
                 API Key
                 {providerHasKey && (
                   <span className="ai-key-configured-badge">
-                    <CheckCircle2 size={11} /> 已设置 {config?.api_key_masked}
+                    <CheckCircle2 size={11} /> 已设置 {isActiveProvider ? config?.api_key_masked : '已独立保存'}
                   </span>
                 )}
               </label>

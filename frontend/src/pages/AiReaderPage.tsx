@@ -726,8 +726,13 @@ function AiSettingsModal({
         `/api/ai-reader/config/models?base_url=${encodeURIComponent(baseUrl)}&api_key=${encodeURIComponent(apiKey)}&http_proxy=${encodeURIComponent(httpProxy)}`,
       )
       setFetchedModels(res)
-      if (!res.length) toast.error('未获取到模型列表，服务商可能不支持该接口')
-      else toast.success(`已获取 ${res.length} 个可用模型`)
+      if (!res.length) {
+        toast.error('未获取到模型列表，服务商可能不支持该接口')
+      } else {
+        toast.success(`已获取 ${res.length} 个可用模型`)
+        // 如果当前模型不在获取的列表中，自动选中第一个
+        setModel((prev) => res.includes(prev) ? prev : res[0])
+      }
     } catch (e: unknown) {
       toast.error((e as Error)?.message || '获取模型列表失败')
     } finally {
@@ -937,27 +942,18 @@ function AiSettingsModal({
                   {fetchingModels ? '获取中…' : '获取实际模型'}
                 </button>
               </label>
-              {displayModels.length > 0 ? (
-                <div className="ai-model-chip-row">
-                  {displayModels.map((m) => (
-                    <button
-                      key={m}
-                      type="button"
-                      className={`ai-model-chip${model === m ? ' active' : ''}`}
-                      onClick={() => setModel(m)}
-                    >
-                      {m}
-                    </button>
-                  ))}
-                </div>
-              ) : null}
               <input
                 className="input"
+                list="ai-model-datalist"
                 value={model}
                 onChange={(e) => setModel(e.target.value)}
-                placeholder="例如：Qwen/Qwen3-8B 或 deepseek-chat"
-                style={{ marginTop: displayModels.length ? 8 : 0 }}
+                placeholder="请选择或输入模型，例如：Qwen/Qwen3-8B"
               />
+              <datalist id="ai-model-datalist">
+                {displayModels.map((m) => (
+                  <option key={m} value={m} />
+                ))}
+              </datalist>
               <div className="ai-settings-hint">
                 {fetchedModels.length ? '以上为服务商接口实际返回的可用模型。' : '也可直接填入服务商支持的其他模型名称，或点击上方「获取实际模型」拉取服务商真实支持的模型。'}
               </div>

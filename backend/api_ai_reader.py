@@ -638,7 +638,7 @@ async def test_config(
     pcfg = _get_provider_config(cfg, req_base_url)
     req_http_proxy = http_proxy.strip() or pcfg.get("http_proxy", cfg.http_proxy)
     req_api_key = api_key.strip()
-    if not req_api_key:
+    if not req_api_key or req_api_key.startswith("***"):
         if req_base_url.rstrip("/") == (cfg.base_url or "").rstrip("/") or pcfg.get("api_key"):
             req_api_key = pcfg.get("api_key", cfg.api_key)
         else:
@@ -690,7 +690,7 @@ async def get_balance(
     req_base_url = base_url.strip() or cfg.base_url or "https://api.siliconflow.cn/v1"
     pcfg = _get_provider_config(cfg, req_base_url)
     req_api_key = api_key.strip()
-    if not req_api_key:
+    if not req_api_key or req_api_key.startswith("***"):
         if req_base_url.rstrip("/") == (cfg.base_url or "").rstrip("/") or pcfg.get("api_key"):
             req_api_key = pcfg.get("api_key", cfg.api_key)
         else:
@@ -726,7 +726,7 @@ async def get_models(
     req_base_url = base_url.strip() or cfg.base_url or "https://api.siliconflow.cn/v1"
     pcfg = _get_provider_config(cfg, req_base_url)
     req_api_key = api_key.strip()
-    if not req_api_key:
+    if not req_api_key or req_api_key.startswith("***"):
         if req_base_url.rstrip("/") == (cfg.base_url or "").rstrip("/") or pcfg.get("api_key"):
             req_api_key = pcfg.get("api_key", cfg.api_key)
         else:
@@ -954,7 +954,8 @@ async def generate_report_stream(
         if existing:
             # 直接流式回放缓存报告
             async def replay():
-                yield f"data: {json.dumps({'content': existing.report_json, 'cached': True}, ensure_ascii=False)}\n\n"
+                from datetime import datetime
+                yield f"data: {json.dumps({'content': existing.report_json, 'cached': True, 'id': existing.id, 'version': existing.version, 'generated_at': existing.generated_at.isoformat() if existing.generated_at else None, 'updated_at': existing.updated_at.isoformat() if existing.updated_at else None}, ensure_ascii=False)}\n\n"
                 yield "data: [DONE]\n\n"
             return StreamingResponse(replay(), media_type="text/event-stream",
                                      headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
@@ -1062,12 +1063,6 @@ async def chat_with_report(
         }
     except Exception as e:
         err_msg = str(e)
-        if "429" in err_msg or "503" in err_msg or "Quota" in err_msg or "balance" in err_msg:
-            return {
-                "ok": True,
-                "model": test_cfg["model"] + " (触发服务商限流或配额，但网络已通)",
-                "reply": "",
-            }
         raise HTTPException(status_code=502, detail=err_msg)
 
 class ReportUpdateRequest(BaseModel):
@@ -1192,18 +1187,14 @@ def _build_evolve_system_prompt(cfg):
         "",
         "【核心任务】",
         "你是一位严谨、专业且富有洞察力的阅读编辑。你将收到一份旧版的「结构化阅读报告JSON」，以及读者基于该报告与你进行的「探讨对话」。",
-        "你需要对这份 JSON 报告进行【全面升级与重构】，将对话中产生的：",
-        "  - 新见解",
-        "  - 修正的观点",
-        "  - 拓展的知识关联",
-        "  - 具体的行动建议",
-        "深度且无缝地融入到报告的各个字段中（如 content_summary、core_insights、personal_reflections、knowledge_map、reading_advice）。",
+        "你的任务是对这份旧报告进行【深度升级与重构】。读者在对话中提出的所有新问题、你的解答、新产生的见解、被纠正的观点、延伸的知识关联，都必须被提炼出来，并**无缝编织**进新报告的对应模块中。",
         "",
         "【严格要求】",
-        "1. 绝不能只做字面拼接！必须将对话中的洞察转化为结构化的正式报告语言，重写或大幅扩充相应的模块内容。",
-        "2. 不要遗漏原始报告中有价值的内容，将新旧信息完美融合，使其像是一份从头写出的全新深度报告。",
-        "3. 保持原有的 JSON 结构不变，所有的 Key 必须严格一致。",
-        "4. 【格式要求】：只输出一个合法的 JSON 对象，不带任何其他解释文字，不使用 Markdown 代码块包裹（即不要输出 ```json），请直接输出纯 JSON 文本！",
+        "1. 绝不能只做字面拼接或简单在末尾加两句总结！你必须通读原报告，找到适合插入新见解的逻辑位置，将原段落重写或大幅扩充，使新旧内容融为一体。",
+        "2. 不要遗漏原始报告中有价值的细节和读者高亮标注的内容。新报告的质量和深度必须高于旧报告。",
+        "3. 特别关注对话中产生的「具体行动建议」或「认知框架更新」，确保它们在阅读建议或个人思考中得到体现。",
+        "4. 保持原有的 JSON 结构不变，所有的 Key 必须严格一致。",
+        "5. 【格式要求】：只输出一个合法的 JSON 对象，不带任何其他解释文字，不使用 Markdown 代码块包裹（即不要输出 ```json），请直接输出纯 JSON 文本！",
     ]
     return "\n".join(parts)
 
@@ -1215,7 +1206,7 @@ def _build_evolve_user_prompt(report_json, chat_messages):
         f"{report_str}\n\n"
         "【探讨对话历史】\n"
         f"{chat_str}\n\n"
-        "请深思熟虑地重构这份报告，确保上面的每一点新认知都被严谨地融入。直接输出最新版本的 JSON 报告："
+        "请作为一位专业的阅读编辑，深思熟虑地重构这份报告。确保对话中的每一次深挖、每一个新共识，都被严谨地融入到这份全新的报告中。直接输出最新版本的纯 JSON："
     )
 
 @router.post("/report/{report_id}/evolve/stream")

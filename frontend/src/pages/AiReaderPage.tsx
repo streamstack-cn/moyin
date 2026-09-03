@@ -277,7 +277,7 @@ function MaterialPanel({
  * 干净的加载动画 + 阶段性文案，字数仍在悄悄增长但只用于内部换算「进度」，
  * 不直接展示原文。
  */
-function StreamingText({ chars, phase, customHint }: { chars: number; phase: AiGeneratePhase; customHint?: string }) {
+function StreamingText({ chars, phase, customHint, onStop }: { chars: number; phase: AiGeneratePhase; customHint?: string; onStop?: () => void }) {
   const stage = phaseLabel(phase, chars)
   const steps: { key: AiGeneratePhase; label: string }[] = [
     { key: 'collecting', label: '收集素材' },
@@ -307,6 +307,13 @@ function StreamingText({ chars, phase, customHint }: { chars: number; phase: AiG
         {chars > 0 ? `已输出约 ${chars} 字 · ` : ''}
         {customHint || '篇幅较长或选中全文分析时可能需要一点时间，可随时点击「停止生成」'}
       </div>
+      {onStop && (
+        <div style={{ marginTop: 16, textAlign: 'center' }}>
+          <button type="button" className="btn btn-sm" style={{ color: 'var(--red)', background: 'var(--surface)' }} onClick={onStop}>
+            <Square size={12} fill="currentColor" style={{ marginRight: 6 }} /> 停止生成
+          </button>
+        </div>
+      )}
     </div>
   )
 }
@@ -353,6 +360,7 @@ function ReportView({
   chatHistory = [],
   version,
   updatedAt,
+  onStopMainGen,
 }: {
   report: AiReportContent | null
   reportId: string | null
@@ -366,6 +374,7 @@ function ReportView({
   chatHistory?: { role: string; content: string }[]
   version?: number
   updatedAt?: string | null
+  onStopMainGen?: () => void
 }) {
   const [isEditing, setIsEditing] = useState(false)
   const [editForm, setEditForm] = useState<AiReportContent | null>(null)
@@ -381,14 +390,7 @@ function ReportView({
   if (streaming || evolving) {
     return (
       <div className="glass-panel ai-streaming-panel">
-        <StreamingText chars={evolving ? evolveChars : streamedChars} phase={evolving ? 'model' : phase} customHint={evolving ? "正在重新组织结构和融入对话... " : undefined} />
-        {evolving && (
-          <div style={{ marginTop: 24, textAlign: 'center' }}>
-            <button type="button" className="btn btn-sm" style={{ color: 'var(--red)' }} onClick={() => evolveAbortCtrl.current?.abort()}>
-              <Square size={12} fill="currentColor" style={{ marginRight: 6 }} /> 停止升级
-            </button>
-          </div>
-        )}
+        <StreamingText chars={evolving ? evolveChars : streamedChars} phase={evolving ? 'model' : phase} customHint={evolving ? "正在重新组织结构和融入对话... " : undefined} onStop={evolving ? () => evolveAbortCtrl.current?.abort() : onStopMainGen} />
       </div>
     )
   }
@@ -1226,8 +1228,8 @@ function AiReaderPage() {
   const [report, setReport] = useState<AiReportContent | null>(() => getAiGenerateSession().report)
   const [reportId, setReportId] = useState<string | null>(() => getAiGenerateSession().reportId)
   const [reportGenAt, setReportGenAt] = useState<string | null>(() => getAiGenerateSession().reportGenAt)
-  const [reportVersion, setReportVersion] = useState<number | undefined>()
-  const [reportUpdatedAt, setReportUpdatedAt] = useState<string | null>(null)
+  const [reportVersion, setReportVersion] = useState<number | undefined>(() => getAiGenerateSession().reportVersion)
+  const [reportUpdatedAt, setReportUpdatedAt] = useState<string | null>(() => getAiGenerateSession().reportUpdatedAt)
   const [reportAutoSaveChat, setReportAutoSaveChat] = useState<boolean>(true)
   const [chatHistory, setChatHistory] = useState<{ role: string; content: string }[]>([])
   const [config, setConfig] = useState<AiConfig | null>(null)
@@ -1289,6 +1291,8 @@ function AiReaderPage() {
       setReport(s.report)
       setReportId(s.reportId)
       setReportGenAt(s.reportGenAt)
+      setReportVersion(s.reportVersion)
+      setReportUpdatedAt(s.reportUpdatedAt)
     }
   }, [])
 
@@ -1366,6 +1370,8 @@ function AiReaderPage() {
       setReport(s.report)
       setReportId(s.reportId)
       setReportGenAt(s.reportGenAt)
+      setReportVersion(s.reportVersion)
+      setReportUpdatedAt(s.reportUpdatedAt)
       return
     }
 
@@ -1452,6 +1458,8 @@ function AiReaderPage() {
     setReport(null)
     setReportId(null)
     setReportGenAt(null)
+    setReportVersion(undefined)
+    setReportUpdatedAt(null)
     await startAiGenerateSession({
       bookIds: selectedIds,
       force,
@@ -1654,6 +1662,7 @@ function AiReaderPage() {
                 onSaved={(r) => setReport(r)}
                 chatHistory={chatHistory}
                 version={reportVersion}
+                onStopMainGen={stopGenerating}
                 updatedAt={reportUpdatedAt}
               />
             </div>

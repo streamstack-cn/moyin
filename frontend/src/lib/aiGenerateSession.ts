@@ -66,6 +66,8 @@ export interface AiGenerateSessionSnapshot {
   report: AiReportContent | null
   reportId: string | null
   reportGenAt: string | null
+  reportVersion: number | undefined
+  reportUpdatedAt: string | null
   error: string | null
   /** 供失败/断线一键重试 */
   lastOpts: AiGenerateStartOpts | null
@@ -79,6 +81,8 @@ const EMPTY: AiGenerateSessionSnapshot = {
   report: null,
   reportId: null,
   reportGenAt: null,
+  reportVersion: undefined,
+  reportUpdatedAt: null,
   error: null,
   lastOpts: null,
 }
@@ -297,6 +301,11 @@ export async function startAiGenerateSession(opts: AiGenerateStartOpts): Promise
     let sawDone = false
     let streamError: string | null = null
 
+    let reportId: string | null = null
+    let reportGenAt: string | null = null
+    let reportVersion: number | undefined = undefined
+    let reportUpdatedAt: string | null = null
+
     while (true) {
       const { done, value } = await reader.read()
       if (done) break
@@ -312,10 +321,16 @@ export async function startAiGenerateSession(opts: AiGenerateStartOpts): Promise
           continue
         }
         try {
-          const obj = JSON.parse(payload) as { error?: string; content?: string }
+          const obj = JSON.parse(payload) as { error?: string; content?: string; cached?: boolean; id?: string; generated_at?: string; version?: number; updated_at?: string }
           if (obj.error) {
             streamError = obj.error
             continue
+          }
+          if (obj.cached) {
+            reportId = obj.id || null
+            reportGenAt = obj.generated_at || null
+            reportVersion = obj.version
+            reportUpdatedAt = obj.updated_at || null
           }
           if (typeof obj.content === 'string') {
             reportText += obj.content
@@ -358,8 +373,7 @@ export async function startAiGenerateSession(opts: AiGenerateStartOpts): Promise
       parsed = { raw: reportText }
     }
 
-    let reportId: string | null = null
-    let reportGenAt: string | null = null
+    
     let finalReport = parsed
     try {
       const saved = await api.get<AiReport | null>(`/api/ai-reader/report?book_ids=${bookIds.join(',')}`)
@@ -367,6 +381,8 @@ export async function startAiGenerateSession(opts: AiGenerateStartOpts): Promise
         finalReport = saved.report
         reportId = saved.id
         reportGenAt = saved.generated_at
+        reportVersion = saved.version
+        reportUpdatedAt = saved.updated_at || null
       }
     } catch {
       /* 已有解析结果，拉库失败不挡展示 */
@@ -379,6 +395,8 @@ export async function startAiGenerateSession(opts: AiGenerateStartOpts): Promise
       report: finalReport,
       reportId,
       reportGenAt,
+      reportVersion,
+      reportUpdatedAt,
       streamedChars: reportText.length,
       error: null,
     })
@@ -394,6 +412,8 @@ export async function startAiGenerateSession(opts: AiGenerateStartOpts): Promise
         report: null,
         reportId: null,
         reportGenAt: null,
+        reportVersion: undefined,
+        reportUpdatedAt: null,
         // 保留 lastOpts / bookIds 方便用户再点生成；清 bookIds 以免误显示断线
         bookIds: snapshot.bookIds,
       })

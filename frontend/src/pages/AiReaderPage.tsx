@@ -391,6 +391,80 @@ function ReportView({
     if (!isEditing && report) setEditForm(report)
   }, [report, isEditing])
 
+  const handleEvolve = useCallback(async () => {
+    if (!reportId) return
+    setEvolving(true)
+    setEvolveChars(0)
+    evolveAbortCtrl.current = new AbortController()
+    try {
+      const token = getToken()
+      const res = await fetch(`/api/ai-reader/report/${reportId}/evolve/stream`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        signal: evolveAbortCtrl.current.signal,
+      })
+      if (!res.ok) {
+        let errText = '网络请求失败'
+        try {
+          const errJson = await res.json()
+          errText = errJson.detail || errJson.message || errText
+        } catch {
+          errText = `网络请求失败 (${res.status})`
+        }
+        throw new Error(errText)
+      }
+      const reader = res.body?.getReader()
+      if (!reader) throw new Error('无法读取流')
+      const decoder = new TextDecoder()
+      let totalChars = 0
+
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+        const chunk = decoder.decode(value, { stream: true })
+        const lines = chunk.split('\n')
+        for (const line of lines) {
+          if (line.startsWith('data: ')) {
+            const dataStr = line.slice(6)
+            if (dataStr === '[DONE]') break
+            try {
+              const data = JSON.parse(dataStr)
+              if (data.error) throw new Error(data.error)
+              if (data.content) {
+                totalChars += data.content.length
+                setEvolveChars(totalChars)
+              }
+            } catch {}
+          }
+        }
+      }
+
+      clearAiGenerateSession()
+      toast.success('报告升级成功！已融合追问见解')
+      if (onReportUpgraded) {
+        onReportUpgraded()
+      } else {
+        window.location.reload()
+      }
+    } catch (e: any) {
+      if (e.name === 'AbortError') {
+        toast('已停止升级')
+      } else {
+        toast.error(e.message || '升级失败')
+      }
+    } finally {
+      setEvolving(false)
+      evolveAbortCtrl.current = null
+    }
+  }, [reportId, onReportUpgraded])
+
+  useEffect(() => {
+    onRegisterEvolve?.(handleEvolve)
+  }, [onRegisterEvolve, handleEvolve])
+
   if (streaming || evolving) {
     return (
       <div className="glass-panel ai-streaming-panel">
@@ -439,80 +513,6 @@ function ReportView({
     }
     setSaving(false)
   }
-
-  const handleEvolve = async () => {
-    if (!reportId) return
-    setEvolving(true)
-    setEvolveChars(0)
-    evolveAbortCtrl.current = new AbortController()
-    try {
-      const token = getToken()
-      const res = await fetch(`/api/ai-reader/report/${reportId}/evolve/stream`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
-        },
-        signal: evolveAbortCtrl.current.signal,
-      })
-      if (!res.ok) {
-        let errText = '网络请求失败'
-        try {
-          const errJson = await res.json()
-          errText = errJson.detail || errJson.message || errText
-        } catch (e) {
-          errText = `网络请求失败 (${res.status})`
-        }
-        throw new Error(errText)
-      }
-      const reader = res.body?.getReader()
-      if (!reader) throw new Error('无法读取流')
-      const decoder = new TextDecoder()
-      let totalChars = 0
-
-      while (true) {
-        const { done, value } = await reader.read()
-        if (done) break
-        const chunk = decoder.decode(value, { stream: true })
-        const lines = chunk.split('\n')
-        for (const line of lines) {
-          if (line.startsWith('data: ')) {
-            const dataStr = line.slice(6)
-            if (dataStr === '[DONE]') break
-            try {
-              const data = JSON.parse(dataStr)
-              if (data.error) throw new Error(data.error)
-              if (data.content) {
-                totalChars += data.content.length
-                setEvolveChars(totalChars)
-              }
-            } catch (e) {}
-          }
-        }
-      }
-
-      clearAiGenerateSession()
-      toast.success('报告升级成功！已融合追问见解')
-      if (onReportUpgraded) {
-        onReportUpgraded()
-      } else {
-        window.location.reload()
-      }
-    } catch (e: any) {
-      if (e.name === 'AbortError') {
-        toast('已停止升级')
-      } else {
-        toast.error(e.message || '升级失败')
-      }
-    } finally {
-      setEvolving(false)
-      evolveAbortCtrl.current = null
-    }
-  }
-
-  useEffect(() => {
-    onRegisterEvolve?.(handleEvolve)
-  }, [onRegisterEvolve, reportId])
 
   const sections = [
     { key: 'content_summary' as keyof AiReportContent, icon: <BookOpen size={15} />, title: '内容概括', kicker: '开篇' },

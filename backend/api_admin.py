@@ -8,6 +8,7 @@ import os
 import shutil
 import tempfile
 import uuid
+from typing import Optional
 from datetime import datetime
 from pathlib import Path
 
@@ -367,7 +368,12 @@ def put_google_books_settings(
     admin: User = Depends(require_admin),
 ):
     key = (payload.api_key or "").strip()
-    _set_config(db, GOOGLE_BOOKS_API_KEY, key)
+    # 输入框留空 = 保持已保存的 Key 不变，避免只改开关/代理时把 Key 清空
+    if key:
+        _set_config(db, GOOGLE_BOOKS_API_KEY, key)
+    else:
+        row = db.query(AppConfig).filter_by(key=GOOGLE_BOOKS_API_KEY).first()
+        key = (row.value if row else "") or ""
     _set_config(db, GOOGLE_BOOKS_ENABLED_KEY, "true" if payload.enabled else "false")
     _set_config(db, GOOGLE_BOOKS_PROXY_KEY, (payload.proxy or "").strip())
     db.commit()
@@ -378,18 +384,29 @@ def put_google_books_settings(
     }
 
 
+class GoogleBooksTestPayload(BaseModel):
+    api_key: str = ""
+    proxy: Optional[str] = None
+
+
 @settings_router.post("/google-books/test")
 async def test_google_books_settings(
+    payload: GoogleBooksTestPayload = GoogleBooksTestPayload(),
     db: Session = Depends(get_db),
     admin: User = Depends(require_admin),
 ):
-    """用当前配置的 API Key 和代理做一次轻量连通性检测。"""
+    """做一次轻量连通性检测。输入框里的 Key/代理优先，留空则用已保存的配置。"""
     from services import google_books_service
 
-    row = db.query(AppConfig).filter_by(key=GOOGLE_BOOKS_API_KEY).first()
-    key = (row.value if row else "") or ""
-    proxy_row = db.query(AppConfig).filter_by(key=GOOGLE_BOOKS_PROXY_KEY).first()
-    proxy = (proxy_row.value if proxy_row else "") or os.environ.get("GOOGLE_BOOKS_PROXY", "") or ""
+    key = (payload.api_key or "").strip()
+    if not key:
+        row = db.query(AppConfig).filter_by(key=GOOGLE_BOOKS_API_KEY).first()
+        key = (row.value if row else "") or ""
+    if payload.proxy is not None:
+        proxy = payload.proxy.strip()
+    else:
+        proxy_row = db.query(AppConfig).filter_by(key=GOOGLE_BOOKS_PROXY_KEY).first()
+        proxy = (proxy_row.value if proxy_row else "") or os.environ.get("GOOGLE_BOOKS_PROXY", "") or ""
     return await google_books_service.ping(key, proxy=proxy)
 
 

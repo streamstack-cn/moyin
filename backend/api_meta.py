@@ -125,9 +125,18 @@ async def proxy_cover(url: str = Query(..., min_length=8, max_length=1024)):
     content = b""
     content_type = "image/jpeg"
     try:
-        async with httpx.AsyncClient(timeout=20, follow_redirects=True) as client:
+        from services import google_books_service
+
+        client_kwargs: dict = {"timeout": 12, "follow_redirects": True}
+        proxy = google_books_service.proxy_for_url(url)
+        if proxy:
+            client_kwargs["proxy"] = proxy
+        async with httpx.AsyncClient(**client_kwargs) as client:
             for candidate in candidates:
-                resp = await client.get(candidate, headers=headers)
+                try:
+                    resp = await client.get(candidate, headers=headers)
+                except httpx.HTTPError:
+                    continue
                 if resp.status_code != 200 or not resp.content or len(resp.content) < 200:
                     continue
                 final_host = urlparse(str(resp.url)).hostname or ""

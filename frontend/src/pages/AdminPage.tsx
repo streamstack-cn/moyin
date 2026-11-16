@@ -911,7 +911,7 @@ function GoogleBooksPanel() {
     try {
       const r = await api.post<{ ok: boolean; message: string; has_api_key: boolean }>(
         '/api/settings/google-books/test',
-        {},
+        { api_key: apiKey.trim(), proxy: proxy.trim() },
       )
       setTestMsg(r.message || (r.ok ? '可用' : '不可用'))
       setTestOk(r.ok)

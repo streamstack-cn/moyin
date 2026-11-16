@@ -39,6 +39,36 @@ def resolve_proxy(explicit: str | None = None) -> str:
     return (explicit or os.environ.get("GOOGLE_BOOKS_PROXY") or "").strip()
 
 
+_GOOGLE_HOST_SUFFIXES = ("google.com", "googleusercontent.com", "googleapis.com")
+
+
+def is_google_host(host: str) -> bool:
+    host = (host or "").lower().rstrip(".")
+    return any(host == s or host.endswith("." + s) for s in _GOOGLE_HOST_SUFFIXES)
+
+
+def proxy_for_url(url: str) -> str:
+    """Google 域名的封面/图片需走管理后台配置的代理；其它域名（豆瓣等）直连。"""
+    from urllib.parse import urlparse
+
+    if not is_google_host(urlparse(url).hostname or ""):
+        return ""
+    stored = ""
+    try:
+        from database import SessionLocal
+        from models import AppConfig
+
+        db = SessionLocal()
+        try:
+            row = db.query(AppConfig).filter_by(key="GOOGLE_BOOKS_PROXY").first()
+            stored = (row.value if row else "") or ""
+        finally:
+            db.close()
+    except Exception:  # noqa: BLE001
+        logger.warning("读取 Google 代理配置失败", exc_info=True)
+    return resolve_proxy(stored)
+
+
 def _pick_isbn(identifiers: list[dict]) -> str:
     for kind in ("ISBN_13", "ISBN_10"):
         for item in identifiers or []:

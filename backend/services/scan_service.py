@@ -330,7 +330,13 @@ async def _download_cover_image(url: str) -> Optional[str]:
     content = b""
     used = url
     try:
-        async with httpx.AsyncClient(timeout=20, follow_redirects=True) as client:
+        from services import google_books_service
+
+        client_kwargs: dict = {"timeout": 20, "follow_redirects": True}
+        proxy = google_books_service.proxy_for_url(url)
+        if proxy:
+            client_kwargs["proxy"] = proxy
+        async with httpx.AsyncClient(**client_kwargs) as client:
             for candidate in candidates:
                 try:
                     resp = await client.get(candidate, headers=headers)
